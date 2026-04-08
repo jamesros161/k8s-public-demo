@@ -100,7 +100,7 @@ Point them to **`terraform/backend.swift-s3.hcl.example`** for local testing.
 ## 7. DNS (customer-controlled)
 
 1. Agree on a DNS **apex** for the demo, e.g. **`k8sdemo.customer.example`**. The customer sets **`DEMO_DOMAIN_BASE`** to that apex (no leading `*.`).
-2. Explain that site hostnames are **`{site_id}.{app_type}.{DEMO_DOMAIN_BASE}`** (e.g. **`wp1.wordpress.k8sdemo.customer.example`**, **`dp1.drupal.k8sdemo.customer.example`**). A **single** wildcard **`*.{apex}`** pointed at the Traefik VIP (e.g. **`*.k8sdemo.customer.example`**) is enough: it covers all subdomains of **`DEMO_DOMAIN_BASE`**, including multi-label hostnames like `wp1.wordpress.…` as long as they remain under that zone.
+2. Explain that **Site - Deploy** asks for a **subdomain** (DNS label, default **`demo`**), producing URLs like **`<subdomain>.wordpress.<apex>`** and **`<subdomain>.drupal.<apex>`**. A **single** wildcard **`*.{apex}`** pointed at the Traefik VIP (e.g. **`*.k8sdemo.customer.example`**) is enough for those hostnames and for **`headlamp.<apex>`** / **`traefik.<apex>`** if used.
 
 After **Cluster - Provision**, the Traefik Service **EXTERNAL-IP** (or NodePort, if they use **`TRAEFIK_SERVICE_TYPE=NodePort`**) must match what DNS points to.
 

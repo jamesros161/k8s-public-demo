@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       site_id:
-        description: Short site slug (same as deploy), e.g. alpha
+        description: Same value as **Site - Deploy → subdomain** (e.g. demo, blog)
         required: true
         type: string
       app_type:

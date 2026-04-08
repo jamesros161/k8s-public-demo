@@ -3,9 +3,12 @@ name: Site - Deploy
 on:
   workflow_dispatch:
     inputs:
-      site_id:
-        description: Short site slug (DNS label), e.g. alpha — upper-case is normalized to lower-case for Helm/Kubernetes
-        required: true
+      subdomain:
+        description: |
+          Site subdomain — the first segment of the hostname (e.g. blog → blog.wordpress.your-domain / blog.drupal.your-domain).
+          Use lowercase letters, numbers, and hyphens only (DNS label). Leave default for a site named "demo".
+        required: false
+        default: "demo"
         type: string
       app_type:
         description: Application stack
@@ -14,30 +17,14 @@ on:
         options:
           - wordpress
           - drupal
-      wordpress_site_title:
-        description: WordPress site title (ignored for Drupal)
-        required: false
-        default: "Demo site"
-        type: string
-      wordpress_tagline:
-        description: WordPress tagline / site description
-        required: false
-        default: ""
-        type: string
-      wordpress_admin_username:
-        description: WordPress admin username
+      admin_username:
+        description: Admin username (WordPress and Drupal)
         required: false
         default: "admin"
         type: string
-      wordpress_admin_email:
-        description: WordPress admin email (ignored for Drupal; change default for real mail)
-        required: false
-        default: "wp-admin@example.invalid"
-        type: string
-      drupal_admin_username:
-        description: Drupal admin username (ignored for WordPress; must match Helm drupal.adminUser)
-        required: false
-        default: "admin"
+      admin_password:
+        description: Admin password (demo-oriented; change in the app later — do not use a production password)
+        required: true
         type: string
 
 permissions:
@@ -101,14 +88,16 @@ jobs:
         with:
           version: v3.14.4
 
-      - name: Normalize site id (Helm/Kubernetes DNS label)
+      - name: Normalize subdomain (Helm release / DNS label)
         id: site
         run: |
           set -euo pipefail
-          SLUG=$(bash scripts/normalize-site-id.sh "${{ inputs.site_id }}")
+          RAW="${{ inputs.subdomain }}"
+          if [ -z "${RAW// }" ]; then RAW="demo"; fi
+          SLUG=$(bash scripts/normalize-site-id.sh "${RAW}")
           echo "slug=${SLUG}" >> "${GITHUB_OUTPUT}"
-          if [ "${{ inputs.site_id }}" != "${SLUG}" ]; then
-            echo "::notice::site_id normalized: '${{ inputs.site_id }}' → '${SLUG}' (Helm release names must be lowercase)."
+          if [ "${RAW}" != "${SLUG}" ]; then
+            echo "::notice::subdomain normalized for Kubernetes/DNS: '${RAW}' → '${SLUG}'"
           fi
 
       - name: Helm upgrade (site)
@@ -118,8 +107,11 @@ jobs:
           DOMAIN_BASE: ${{ vars.DEMO_DOMAIN_BASE }}
           DB_PASS: ${{ secrets.DEMO_DB_PASSWORD }}
           DB_ROOT: ${{ secrets.DEMO_DB_ROOT_PASSWORD }}
+          ADMIN_USER: ${{ inputs.admin_username != '' && inputs.admin_username || 'admin' }}
+          ADMIN_PASSWORD: ${{ inputs.admin_password }}
         run: |
           set -euo pipefail
+          echo "::add-mask::${ADMIN_PASSWORD}"
           if [ -z "${DB_PASS}" ] || [ -z "${DB_ROOT}" ]; then
             echo "::error::DEMO_DB_PASSWORD and DEMO_DB_ROOT_PASSWORD must be set to non-empty values in repository Secrets."
             echo "If either secret is missing, Helm gets --set db.password= / db.rootPassword= and overrides chart defaults; MariaDB then exits with 'password option is not specified'."
@@ -128,16 +120,11 @@ jobs:
           NS="${SITE_ID}-${APP_TYPE}"
           REL="$SITE_ID"
           DOMAIN="${DOMAIN_BASE:-k8sdemo.example.com}"
-          rm -f "${RUNNER_TEMP}/drupal_site_admin_password" || true
           DRUPAL_HELM=()
           if [ "${APP_TYPE}" = "drupal" ]; then
-            DP="$(openssl rand -base64 30 | tr -d '\n')"
-            echo "::add-mask::${DP}"
-            printf '%s' "${DP}" > "${RUNNER_TEMP}/drupal_site_admin_password"
-            chmod 600 "${RUNNER_TEMP}/drupal_site_admin_password"
             DRUPAL_HELM=(
-              --set-string "drupal.adminPassword=${DP}"
-              --set-string "drupal.adminUser=${{ inputs.drupal_admin_username }}"
+              --set-string "drupal.adminPassword=${ADMIN_PASSWORD}"
+              --set-string "drupal.adminUser=${ADMIN_USER}"
             )
           fi
           helm upgrade --install "$REL" ./helm/site-template \
@@ -157,18 +144,14 @@ jobs:
           SITE_ID: ${{ steps.site.outputs.slug }}
           APP_TYPE: wordpress
           DOMAIN_BASE: ${{ vars.DEMO_DOMAIN_BASE }}
-          WP_SITE_TITLE: ${{ inputs.wordpress_site_title }}
-          WP_TAGLINE: ${{ inputs.wordpress_tagline }}
-          WP_ADMIN_USER: ${{ inputs.wordpress_admin_username }}
-          WP_ADMIN_EMAIL: ${{ inputs.wordpress_admin_email }}
+          WP_ADMIN_USER: ${{ inputs.admin_username != '' && inputs.admin_username || 'admin' }}
+          WP_ADMIN_PASSWORD: ${{ inputs.admin_password }}
           MARIADB_ROOT_PASSWORD: ${{ secrets.DEMO_DB_ROOT_PASSWORD }}
           DB_APP_PASSWORD: ${{ secrets.DEMO_DB_PASSWORD }}
         run: |
           set -euo pipefail
-          export DOMAIN_BASE="${DOMAIN_BASE:-k8sdemo.example.com}"
-          WP_ADMIN_PASSWORD="$(openssl rand -base64 30 | tr -d '\n')"
           echo "::add-mask::${WP_ADMIN_PASSWORD}"
-          export WP_ADMIN_PASSWORD
+          export DOMAIN_BASE="${DOMAIN_BASE:-k8sdemo.example.com}"
           bash scripts/wordpress-wpcli-bootstrap.sh
           kubectl create secret generic wordpress-admin \
             --namespace="${DEPLOY_NAMESPACE}" \
@@ -176,7 +159,7 @@ jobs:
             --from-literal=password="${WP_ADMIN_PASSWORD}" \
             --from-literal=site-url="https://${SITE_ID}.wordpress.${DOMAIN_BASE}/" \
             --dry-run=client -o yaml | kubectl apply -f -
-          echo "::notice::WordPress admin password is in Secret wordpress-admin (namespace ${DEPLOY_NAMESPACE}). Retrieve with kubectl — see README."
+          echo "::notice::WordPress URL: https://${SITE_ID}.wordpress.${DOMAIN_BASE}/ — admin credentials are also in Secret wordpress-admin (namespace ${DEPLOY_NAMESPACE})."
 
       - name: Drupal — sync admin password and store Secret
         if: inputs.app_type == 'drupal'
@@ -185,15 +168,14 @@ jobs:
           SITE_ID: ${{ steps.site.outputs.slug }}
           APP_TYPE: drupal
           DOMAIN_BASE: ${{ vars.DEMO_DOMAIN_BASE }}
-          DRUPAL_ADMIN_USER: ${{ inputs.drupal_admin_username }}
+          DRUPAL_ADMIN_USER: ${{ inputs.admin_username != '' && inputs.admin_username || 'admin' }}
+          DRUPAL_ADMIN_PASSWORD: ${{ inputs.admin_password }}
           MARIADB_ROOT_PASSWORD: ${{ secrets.DEMO_DB_ROOT_PASSWORD }}
           DB_APP_PASSWORD: ${{ secrets.DEMO_DB_PASSWORD }}
         run: |
           set -euo pipefail
-          export DOMAIN_BASE="${DOMAIN_BASE:-k8sdemo.example.com}"
-          PF="${RUNNER_TEMP}/drupal_site_admin_password"
-          export DRUPAL_ADMIN_PASSWORD="$(cat "$PF")"
           echo "::add-mask::${DRUPAL_ADMIN_PASSWORD}"
+          export DOMAIN_BASE="${DOMAIN_BASE:-k8sdemo.example.com}"
           bash scripts/drupal-drush-bootstrap.sh
           kubectl create secret generic drupal-admin \
             --namespace="${DEPLOY_NAMESPACE}" \
@@ -201,4 +183,4 @@ jobs:
             --from-literal=password="${DRUPAL_ADMIN_PASSWORD}" \
             --from-literal=site-url="https://${SITE_ID}.drupal.${DOMAIN_BASE}/" \
             --dry-run=client -o yaml | kubectl apply -f -
-          echo "::notice::Drupal admin password is in Secret drupal-admin (namespace ${DEPLOY_NAMESPACE}). Retrieve with kubectl — see README."
+          echo "::notice::Drupal URL: https://${SITE_ID}.drupal.${DOMAIN_BASE}/ — admin credentials are also in Secret drupal-admin (namespace ${DEPLOY_NAMESPACE})."

@@ -21,7 +21,7 @@ This repository shows how to use **GitHub Actions** with **OpenStack** to provis
    Fix any reported errors, then re-run.
 5. Run **Cluster - Provision** (long-running: cluster create, nodes ready, Traefik install). When it finishes, find the address in the Actions log: open the **`provision`** job, then the step **Show Traefik service (get LB VIP or NodePorts)** — that step prints `kubectl get svc -n traefik traefik`, where **EXTERNAL-IP** is the load balancer VIP (or **NodePorts** if you set **`TRAEFIK_SERVICE_TYPE=NodePort`**).
 6. Point DNS at Traefik as described in [DNS](#dns).
-7. Run **Site - Deploy** with a `site_id` and `app_type` (`wordpress` or `drupal`).
+7. Run **Site - Deploy**: set **subdomain** (first part of the URL; default `demo`), choose **WordPress** or **Drupal**, then **admin username** (defaults to `admin`) and **admin password**. Example: subdomain `blog` → `blog.wordpress.<your base>` or `blog.drupal.<your base>`, namespace `blog-wordpress` or `blog-drupal`.
 
 If something fails after configuration looks correct (networking, Magnum, load balancers, certificates, etc.), work with your **cloud administrator**. Detailed operational runbooks are **not** part of this public repository; admins should use **your organization’s internal documentation**.
 
@@ -113,7 +113,7 @@ Do **not** leave these empty: blank secrets override chart defaults and break Ma
 | **Validate configuration** | Check Variables/Secrets and OpenStack connectivity (also runs first in other workflows). |
 | **Cluster - Provision** | Terraform apply, wait for Magnum, kubeconfig, Traefik + ACME. |
 | **Cluster - Destroy** | Confirm with `destroy-infra-confirm`; tears down Terraform-managed resources. |
-| **Site - Deploy** | Deploy WordPress or Drupal into `{site_id}-{app_type}`. |
+| **Site - Deploy** | Deploy WordPress or Drupal: **subdomain** (DNS label), app type, admin username, admin password. |
 | **Site - Destroy** | Remove one site namespace. |
 | **Site - Destroy All** | Remove all `*-wordpress` / `*-drupal` namespaces from normal deploys. |
 | **Scaling - Burst Up / Down** | Many Drupal installs for autoscaler demos. |
@@ -131,7 +131,7 @@ After provision, point DNS at the Traefik Service address from:
 
 `kubectl get svc -n traefik traefik`
 
-Sites use hostnames **`{site_id}.{app_type}.{DEMO_DOMAIN_BASE}`** — for example **`wp1.wordpress.k8sdemo.example.com`** or **`dp1.drupal.k8sdemo.example.com`**.
+**Site - Deploy** hostnames are **`<subdomain>.wordpress.<DEMO_DOMAIN_BASE>`** or **`<subdomain>.drupal.<DEMO_DOMAIN_BASE>`** (for example **`blog.wordpress.k8sdemo.example.com`**). The workflow calls this value **subdomain**; it is the same idea as **site_id** in **Site - Destroy** (use the same string to tear down what you deployed).
 
 You only need **one** wildcard under **`DEMO_DOMAIN_BASE`**, aimed at the Traefik **EXTERNAL-IP** (or a CNAME to it), for example:
 
@@ -159,19 +159,19 @@ export KUBECONFIG="$HOME/.kube/config"
 
 If the API URL is unreachable from the public internet, run the same commands from a bastion or VPN inside the cloud.
 
-**Application admin passwords** (random each deploy) are stored in the cluster only:
+**Application admin** credentials match what you entered in **Site - Deploy**; they are also copied into Secrets for scripting:
 
 ```bash
-# WordPress — namespace {site_id}-wordpress
-NS=wp1-wordpress
+# WordPress — namespace <subdomain>-wordpress (example: demo-wordpress)
+NS=demo-wordpress
 kubectl get secret wordpress-admin -n "$NS" -o jsonpath='{.data.username}' | base64 -d; echo
 kubectl get secret wordpress-admin -n "$NS" -o jsonpath='{.data.password}' | base64 -d; echo
 kubectl get secret wordpress-admin -n "$NS" -o jsonpath='{.data.site-url}' | base64 -d; echo
 ```
 
 ```bash
-# Drupal — namespace {site_id}-drupal
-NS=site1-drupal
+# Drupal — namespace <subdomain>-drupal (example: demo-drupal)
+NS=demo-drupal
 kubectl get secret drupal-admin -n "$NS" -o jsonpath='{.data.username}' | base64 -d; echo
 kubectl get secret drupal-admin -n "$NS" -o jsonpath='{.data.password}' | base64 -d; echo
 kubectl get secret drupal-admin -n "$NS" -o jsonpath='{.data.site-url}' | base64 -d; echo

@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # Run from CI or locally with kubeconfig; bootstraps WordPress via WP-CLI inside the cluster.
-# Required env: DEPLOY_NAMESPACE, SITE_ID, APP_TYPE, DOMAIN_BASE, WP_SITE_TITLE, WP_ADMIN_USER,
-#               WP_ADMIN_EMAIL, WP_ADMIN_PASSWORD, MARIADB_ROOT_PASSWORD, DB_APP_PASSWORD
-# Optional env: WP_TAGLINE (default empty), DB_APP_USER (default admin), DB_APP_NAME (default wordpress)
+# Required env: DEPLOY_NAMESPACE, SITE_ID, APP_TYPE, DOMAIN_BASE, WP_ADMIN_USER, WP_ADMIN_PASSWORD,
+#               MARIADB_ROOT_PASSWORD, DB_APP_PASSWORD
+# Optional env: WP_SITE_TITLE (default "Demo site"), WP_ADMIN_EMAIL (default demo@example.local),
+#               WP_TAGLINE (default empty), DB_APP_USER (default admin), DB_APP_NAME (default wordpress)
 set -euo pipefail
 
 : "${DEPLOY_NAMESPACE:?}"
 : "${SITE_ID:?}"
 : "${APP_TYPE:?}"
 : "${DOMAIN_BASE:?}"
-: "${WP_SITE_TITLE:?}"
 : "${WP_ADMIN_USER:?}"
-: "${WP_ADMIN_EMAIL:?}"
 : "${WP_ADMIN_PASSWORD:?}"
 : "${MARIADB_ROOT_PASSWORD:?}"
 : "${DB_APP_PASSWORD:?}"
@@ -19,6 +18,8 @@ set -euo pipefail
 DB_APP_USER="${DB_APP_USER:-admin}"
 DB_APP_NAME="${DB_APP_NAME:-wordpress}"
 
+WP_SITE_TITLE="${WP_SITE_TITLE:-Demo site}"
+WP_ADMIN_EMAIL="${WP_ADMIN_EMAIL:-demo@example.local}"
 WP_TAGLINE="${WP_TAGLINE:-}"
 
 if [ "${APP_TYPE}" != "wordpress" ]; then
