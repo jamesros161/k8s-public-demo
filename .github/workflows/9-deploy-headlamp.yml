@@ -1,4 +1,4 @@
-name: 9 - Dashboards - Deploy Headlamp
+name: 09 - Dashboards - Deploy Headlamp
 
 on:
   workflow_dispatch:

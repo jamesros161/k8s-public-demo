@@ -1,4 +1,4 @@
-name: 3 - Deploy Single Site
+name: 03 - Deploy Single Site
 
 on:
   workflow_dispatch:

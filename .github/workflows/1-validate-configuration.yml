@@ -1,4 +1,4 @@
-name: 1 - Validate configuration
+name: 01 - Validate configuration
 
 on:
   workflow_dispatch:
