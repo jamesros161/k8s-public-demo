@@ -1,0 +1,6 @@
+apiVersion: v2
+name: site-template
+description: Per-tenant MariaDB + WordPress or Drupal + Traefik IngressRoute
+type: application
+version: 0.1.0
+appVersion: "1.0"

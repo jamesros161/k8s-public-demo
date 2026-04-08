@@ -1,0 +1,44 @@
+# Remote state on OpenStack Swift using Terraform's S3 backend (S3-compatible API).
+#
+# HashiCorp removed the native `backend "swift"` in Terraform 1.3+. Swift deployments
+# that expose the S3 API can use this pattern instead.
+#
+# Prereqs (your cloud / operator docs will name these differently):
+#   - A container ("bucket") for state, e.g. `terraform-state`
+#   - S3-compatible endpoint URL (not the raw Swift REST URL unless it speaks S3)
+#   - Access key + secret key for the S3 API (often NOT the same as OS_* app creds;
+#     many clouds use `openstack ec2 credentials create` or a dedicated object-store user)
+#
+# Setup:
+#   1. Copy this file to `backend.hcl` (gitignored) or `backend.auto.hcl`.
+#   2. In versions.tf, add an empty S3 backend inside the terraform { } block:
+#        backend "s3" {}
+#   3. Export AWS credentials for the S3 API (Terraform's S3 backend uses these names):
+#        export AWS_ACCESS_KEY_ID="..."
+#        export AWS_SECRET_ACCESS_KEY="..."
+#   4. From terraform/:  terraform init -backend-config=backend.hcl
+#      (First time from local state: add -migrate-state if you are moving state.)
+#
+# GitHub Actions: set Variables TF_STATE_S3_BUCKET, TF_STATE_S3_ENDPOINT, optional TF_STATE_S3_KEY;
+# Secrets TF_STATE_S3_ACCESS_KEY_ID, TF_STATE_S3_SECRET_ACCESS_KEY. Workflow runs
+# scripts/write-terraform-s3-backend-ci.sh then terraform init -backend-config=backend.auto.hcl
+
+bucket = "terraform-state" # S3 bucket name = Swift container name in many setups
+
+key = "k8s-demo/terraform.tfstate"
+
+# Dummy region required by the AWS SDK; Swift ignores it if you skip validation below.
+region = "us-east-1"
+
+endpoints = {
+  s3 = "https://object-store.example.com" # your cloud's S3 API base URL
+}
+
+skip_credentials_validation = true
+skip_requesting_account_id  = true
+skip_metadata_api_check     = true
+skip_region_validation      = true
+use_path_style              = true
+
+# Recommended: S3-style lock object alongside the state object (no DynamoDB).
+use_lockfile = true

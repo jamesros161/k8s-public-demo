@@ -1,0 +1,95 @@
+name: Scaling - Burst Down
+
+# Deletes site namespaces created by "Scaling - Burst Up"
+# (pattern scale-<run_id>-<nnn>-drupal). Removes workloads so the cluster autoscaler
+# can scale worker nodes down after its idle delay.
+
+on:
+  workflow_dispatch:
+    inputs:
+      github_run_id:
+        description: "Optional: limit to one burst (GitHub run_id from the install workflow). Leave empty to delete all matching burst namespaces."
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: List matching namespaces only; do not delete
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/validate-configuration.yml
+    with:
+      scenario: core
+    secrets: inherit
+
+  destroy-burst:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
+      OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
+      OS_INTERFACE: ${{ vars.OS_INTERFACE }}
+      OS_IDENTITY_API_VERSION: ${{ vars.OS_IDENTITY_API_VERSION }}
+      OS_AUTH_TYPE: ${{ vars.OS_AUTH_TYPE }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install OpenStack CLI (Magnum)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "python-openstackclient" "python-magnumclient"
+          echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve cluster name
+        id: cluster
+        run: |
+          C="${CLUSTER_NAME}"
+          if [ -z "$C" ]; then C="vpc-demo-cluster"; fi
+          echo "name=$C" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          openstack coe cluster config "${{ steps.cluster.outputs.name }}" --dir "$HOME/.kube"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Destroy burst namespaces
+        env:
+          RUN_ID_FILTER: ${{ inputs.github_run_id }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          bash scripts/destroy-burst-drupal-sites.sh
+
+      - name: Remaining burst-shaped namespaces
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          kubectl get ns -o name 2>/dev/null | sed 's|namespace/||' | grep -E '^scale-[0-9]+-[0-9]+-drupal$' || echo "(none left matching burst pattern)"
+
+      - name: Autoscaler scale-down diagnostics
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          echo "::notice::Extra workers usually disappear only after scale-down delays (often ~10m each unless you ran tune-cluster-autoscaler-demo). They will not drop below Terraform autoscaler_min_nodes (default 2). Nodes still hosting Traefik, other apps, or certain kube-system pods may not be chosen for removal — see diagnostics below."
+          bash scripts/diagnose-cluster-autoscaler-scale-down.sh

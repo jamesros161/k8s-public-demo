@@ -1,0 +1,22 @@
+# Copy to terraform.tfvars for local apply (optional). Do not commit secrets.
+# cluster_name        = "vpc-demo-cluster"
+# node_count          = 2
+# autoscaler_max_nodes = 10
+# external_network_name = "External"
+#
+# If router creation fails with IpAddressGenerationFailure on External, attach the
+# demo subnet to a router that already has a gateway (no new external IP):
+# attach_to_existing_router_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+#
+# If network create ends in DELETED, use an admin/pre-created network UUID instead:
+# existing_network_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+#
+# Optional unique suffix for the created network name (avoids name clashes):
+# network_name_suffix = "run-20260328"
+#
+# Magnum: kubernetes-v1.26.8-rancher1 and kubernetes-v1.23.3-rancher1 both use image_id "Fedora CoreOS 39".
+# If that image is not in "openstack image list", flipping between those two template names will not fix cluster create.
+# cluster_template_name = "some-other-template-from-coe-cluster-template-list"
+#
+# Magnum trust / autoscaler experiments: pin workers (no min/max autoscale labels)
+# cluster_autoscaling_enabled = false

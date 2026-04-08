@@ -1,0 +1,99 @@
+name: Scaling - Tune cluster autoscaler
+
+# Patches the cluster-autoscaler Deployment in kube-system so nodes drain sooner after
+# you delete burst workloads. Magnum does not expose these timers via Terraform labels
+# in this repo; the running autoscaler pod args must be updated.
+#
+# Defaults (2m) are faster than typical upstream (~10m) but avoid sub-minute values that
+# can upset Magnum/Heat. Re-run Provision or cluster upgrades may replace this Deployment.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scale_down_unneeded_time:
+        description: "--scale-down-unneeded-time (how long a node must be unneeded before removal)"
+        required: false
+        default: "2m"
+        type: string
+      scale_down_delay_after_add:
+        description: "--scale-down-delay-after-add (quiet period after a scale-up)"
+        required: false
+        default: "2m"
+        type: string
+      deployment_name:
+        description: "Optional kube-system Deployment name (leave empty to auto-detect cluster-autoscaler)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/validate-configuration.yml
+    with:
+      scenario: core
+    secrets: inherit
+
+  patch-autoscaler:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
+      OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
+      OS_INTERFACE: ${{ vars.OS_INTERFACE }}
+      OS_IDENTITY_API_VERSION: ${{ vars.OS_IDENTITY_API_VERSION }}
+      OS_AUTH_TYPE: ${{ vars.OS_AUTH_TYPE }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install OpenStack CLI (Magnum)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "python-openstackclient" "python-magnumclient"
+          echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve cluster name
+        id: cluster
+        run: |
+          C="${CLUSTER_NAME}"
+          if [ -z "$C" ]; then C="vpc-demo-cluster"; fi
+          echo "name=$C" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          openstack coe cluster config "${{ steps.cluster.outputs.name }}" --dir "$HOME/.kube"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Patch cluster-autoscaler scale-down timers
+        id: autoscaler
+        env:
+          SCALE_DOWN_UNNEEDED_TIME: ${{ inputs.scale_down_unneeded_time }}
+          SCALE_DOWN_DELAY_AFTER_ADD: ${{ inputs.scale_down_delay_after_add }}
+          CA_DEPLOY_NAME: ${{ inputs.deployment_name }}
+        run: |
+          set -euo pipefail
+          python3 scripts/patch-cluster-autoscaler-scale-down.py
+
+      - name: Rollout status
+        run: |
+          set -euo pipefail
+          D="${{ steps.autoscaler.outputs.ca_deploy_name }}"
+          echo "Waiting for rollout: kube-system/${D}"
+          kubectl rollout status "deploy/${D}" -n kube-system --timeout=300s

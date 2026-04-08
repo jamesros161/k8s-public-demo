@@ -1,0 +1,30 @@
+siteId: default
+appType: wordpress
+domainBase: k8sdemo.example.com
+
+resources:
+  requests:
+    memory: 512Mi
+    cpu: 500m
+
+db:
+  user: admin
+  password: change-me-db
+  rootPassword: change-me-root
+
+drupal:
+  adminUser: admin
+  # adminPassword: set by Deploy site workflow (random) for drupal; chart default unused for wordpress.
+  adminPassword: change-me-drupal
+  # bitnami/drupal on Docker Hub has no tags (legacy images → bitnamilegacy/*). Pin immutable tag.
+  image: bitnamilegacy/drupal:10.3.9-debian-12-r0
+
+wordpress:
+  image: wordpress:latest
+  # Title / admin for CI come from Deploy site workflow inputs; password is random + Secret wordpress-admin (not Helm).
+
+# Empty string = cluster default StorageClass (expect Cinder CSI on Magnum).
+storageClass: ""
+
+mariadb:
+  storageSize: 5Gi

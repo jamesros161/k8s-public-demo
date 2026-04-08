@@ -1,0 +1,141 @@
+name: Dashboards - Toggle Traefik
+
+# Enable or disable the built-in Traefik dashboard IngressRoute on websecure (Let's Encrypt).
+# The dashboard is unauthenticated when enabled — suitable for short-lived demos only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      enabled:
+        description: "Expose the dashboard on HTTPS (disable after your demo)"
+        required: true
+        type: choice
+        options:
+          - enable
+          - disable
+        default: enable
+      dashboard_host:
+        description: "Ingress hostname when enabling (empty = traefik.<DEMO_DOMAIN_BASE>); ignored when disabling"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/validate-configuration.yml
+    with:
+      scenario: core
+    secrets: inherit
+
+  toggle:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
+      OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
+      OS_INTERFACE: ${{ vars.OS_INTERFACE }}
+      OS_IDENTITY_API_VERSION: ${{ vars.OS_IDENTITY_API_VERSION }}
+      OS_AUTH_TYPE: ${{ vars.OS_AUTH_TYPE }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+      DEMO_DOMAIN_BASE: ${{ vars.DEMO_DOMAIN_BASE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install OpenStack CLI (Magnum)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "python-openstackclient" "python-magnumclient"
+          echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve cluster name
+        id: cluster
+        run: |
+          C="${CLUSTER_NAME}"
+          if [ -z "$C" ]; then C="vpc-demo-cluster"; fi
+          echo "name=$C" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          openstack coe cluster config "${{ steps.cluster.outputs.name }}" --dir "$HOME/.kube"
+          chmod 600 "$HOME/.kube/config"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Helm upgrade (Traefik dashboard IngressRoute)
+        env:
+          ENABLED: ${{ inputs.enabled }}
+          INPUT_HOST: ${{ inputs.dashboard_host }}
+        run: |
+          set -euo pipefail
+          helm repo add traefik https://traefik.github.io/charts || true
+          helm repo update
+
+          if ! helm status traefik -n traefik >/dev/null 2>&1; then
+            echo "::error::Release traefik not found in namespace traefik. Run the provision workflow first."
+            exit 1
+          fi
+
+          if [ "${ENABLED}" = "enable" ]; then
+            DOMAIN_BASE="${DEMO_DOMAIN_BASE:-k8sdemo.example.com}"
+            if [ -n "${INPUT_HOST}" ]; then
+              HOST="${INPUT_HOST}"
+            else
+              HOST="traefik.${DOMAIN_BASE}"
+            fi
+            RULE='Host(`'"${HOST}"'`) && (PathPrefix(`/dashboard`) || PathPrefix(`/api`))'
+
+            helm upgrade traefik traefik/traefik \
+              --namespace traefik \
+              --reuse-values \
+              --set api.dashboard=true \
+              --set ingressRoute.dashboard.enabled=true \
+              --set-json 'ingressRoute.dashboard.entryPoints=["websecure"]' \
+              --set-string "ingressRoute.dashboard.matchRule=${RULE}" \
+              --set ingressRoute.dashboard.tls.certResolver=letsencrypt \
+              --wait \
+              --timeout 15m
+
+            echo "DASHBOARD_HOST=${HOST}" >> "$GITHUB_ENV"
+          else
+            helm upgrade traefik traefik/traefik \
+              --namespace traefik \
+              --reuse-values \
+              --set ingressRoute.dashboard.enabled=false \
+              --wait \
+              --timeout 15m
+          fi
+
+      - name: Access hints
+        env:
+          ENABLED: ${{ inputs.enabled }}
+        run: |
+          set -euo pipefail
+          kubectl get ingressroute -n traefik -l app.kubernetes.io/name=traefik -o wide 2>/dev/null || true
+          kubectl get svc -n traefik traefik -o wide 2>/dev/null || true
+          echo ""
+          if [ "${ENABLED}" = "enable" ]; then
+            echo "::notice::Traefik dashboard: https://${DASHBOARD_HOST}/dashboard/ — Point DNS at the Traefik LoadBalancer; HTTP-01 uses port 80 on the same VIP. Unauthenticated: run this workflow with disable when finished."
+          else
+            echo "::notice::Traefik dashboard IngressRoute disabled. Re-enable anytime with workflow dispatch → enable."
+          fi

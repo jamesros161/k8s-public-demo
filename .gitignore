@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local credentials (never commit)
+.env
+.env.*
+!.env.example
+*openrc.sh
+clouds.yaml
+clouds.yml
+
+# Terraform
+.terraform/
+# Remote backend partial config (may contain endpoint/bucket names); keep local
+terraform/backend.hcl
+terraform/backend.auto.hcl
+*.tfstate
+*.tfstate.*
+*.auto.tfvars
+terraform/*.tfvars
+!terraform/terraform.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfplan
+tfplan
+plan.out
+
+# Kubernetes / kubeconfig dumps
+kubeconfig
+*.kubeconfig
+config.bak
+kubectl
+net-test-quay.yaml
+
+# Keys
+*.pem
+id_rsa
+id_rsa.pub
+*.p12
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

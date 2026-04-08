@@ -1,0 +1,31 @@
+# Values for: helm upgrade --install traefik traefik/traefik -n traefik -f helm/traefik-values.yaml
+# ACME email is set in CI via --set-string (repository Variable LETSENCRYPT_EMAIL).
+
+ports:
+  web:
+    # HTTP-01 challenge must reach Traefik on :80; bypass redirect for /.well-known/acme-challenge/
+    allowACMEByPass: true
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+persistence:
+  enabled: true
+  size: 128Mi
+  # storageClass: ""  # omit for cluster default (e.g. Cinder)
+
+# Traefik runs as UID/GID 65532; Cinder (and many) PVCs default to root-owned files.
+# Without fsGroup, /data/acme.json hits "permission denied" and ACME never starts (see logs).
+podSecurityContext:
+  fsGroup: 65532
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      # email: set by provision workflow --set-string (LETSENCRYPT_EMAIL).
+      storage: /data/acme.json
+      httpChallenge:
+        entryPoint: web

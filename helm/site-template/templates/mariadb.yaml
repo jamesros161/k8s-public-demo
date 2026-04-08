@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mariadb
+spec:
+  serviceName: mariadb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      # Cinder RWO volumes are often root-owned; MariaDB runs as mysql (uid 999).
+      securityContext:
+        fsGroup: 999
+      containers:
+        - name: mariadb
+          image: mariadb:10.6
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MARIADB_ROOT_PASSWORD
+              value: {{ required "db.rootPassword is required (e.g. Helm --set db.rootPassword=... or GitHub secret DEMO_DB_ROOT_PASSWORD — empty secret overrides defaults and breaks MariaDB)" .Values.db.rootPassword | quote }}
+            - name: MARIADB_DATABASE
+              value: {{ include "site-template.dbName" . | quote }}
+            - name: MARIADB_USER
+              value: {{ .Values.db.user | quote }}
+            - name: MARIADB_PASSWORD
+              value: {{ required "db.password is required (e.g. DEMO_DB_PASSWORD)" .Values.db.password | quote }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.storageClass }}
+        storageClassName: {{ .Values.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.mariadb.storageSize }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+spec:
+  ports:
+    - port: 3306
+      targetPort: 3306
+  selector:
+    app: mariadb

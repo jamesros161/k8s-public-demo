@@ -1,0 +1,15 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ .Values.siteId }}-route
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`{{ .Values.siteId }}.{{ .Values.appType }}.{{ .Values.domainBase }}`)
+      kind: Rule
+      services:
+        - name: {{ .Values.appType }}-service
+          port: 80
+  tls:
+    certResolver: letsencrypt

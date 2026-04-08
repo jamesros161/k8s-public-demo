@@ -1,0 +1,119 @@
+{{- $dbName := include "site-template.dbName" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.appType }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.appType }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.appType }}
+    spec:
+      initContainers:
+        # TCP can be open before the MariaDB entrypoint finishes creating MARIADB_USER / MARIADB_DATABASE
+        # (fresh PVC). Wait until the same credentials the app uses can run a query.
+        - name: wait-for-mariadb
+          image: mariadb:10.6
+          env:
+            - name: MYSQL_PWD
+              value: {{ .Values.db.password | quote }}
+          command:
+            - sh
+            - -ec
+            - |
+              HOST={{ printf "mariadb.%s.svc.cluster.local" .Release.Namespace | quote }}
+              for i in $(seq 1 180); do
+                if mariadb -h "$HOST" -P 3306 \
+                  -u {{ .Values.db.user | quote }} \
+                  -D {{ $dbName | quote }} \
+                  -e "SELECT 1" --silent 2>/dev/null; then
+                  echo "MariaDB application database and user are ready"
+                  exit 0
+                fi
+                echo "Waiting for MariaDB init (attempt $i/180)..."
+                sleep 2
+              done
+              echo "Timed out waiting for MariaDB application user/database"
+              exit 1
+      containers:
+{{- if eq .Values.appType "wordpress" }}
+        - name: app
+          image: {{ .Values.wordpress.image }}
+          ports:
+            - containerPort: 80
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: {{ printf "mariadb.%s.svc.cluster.local" .Release.Namespace | quote }}
+            - name: WORDPRESS_DB_USER
+              value: {{ .Values.db.user | quote }}
+            - name: WORDPRESS_DB_PASSWORD
+              value: {{ .Values.db.password | quote }}
+            - name: WORDPRESS_DB_NAME
+              value: {{ $dbName | quote }}
+            - name: WORDPRESS_CONFIG_EXTRA
+              value: 'if (isset($_SERVER["HTTP_X_FORWARDED_PROTO"]) && $_SERVER["HTTP_X_FORWARDED_PROTO"] === "https") { $_SERVER["HTTPS"] = "on"; }'
+          # Official image copies /usr/src/wordpress → /var/www/html on start (anonymous volume).
+          # Without a probe, Kubernetes can mark the pod Ready before that copy finishes, so CI/WP-CLI
+          # sees an empty tree and errors: "This does not seem to be a WordPress installation."
+          readinessProbe:
+            exec:
+              command:
+                - test
+                - -f
+                - /var/www/html/wp-includes/version.php
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            timeoutSeconds: 2
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- else if eq .Values.appType "drupal" }}
+        - name: app
+          image: {{ .Values.drupal.image }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ALLOW_EMPTY_PASSWORD
+              value: "no"
+            - name: MARIADB_HOST
+              value: {{ printf "mariadb.%s.svc.cluster.local" .Release.Namespace | quote }}
+            - name: MARIADB_PORT_NUMBER
+              value: "3306"
+            - name: DRUPAL_DATABASE_HOST
+              value: {{ printf "mariadb.%s.svc.cluster.local" .Release.Namespace | quote }}
+            - name: DRUPAL_DATABASE_PORT_NUMBER
+              value: "3306"
+            - name: DRUPAL_DATABASE_NAME
+              value: {{ $dbName | quote }}
+            - name: DRUPAL_DATABASE_USER
+              value: {{ .Values.db.user | quote }}
+            - name: DRUPAL_DATABASE_PASSWORD
+              value: {{ .Values.db.password | quote }}
+            - name: DRUPAL_USERNAME
+              value: {{ .Values.drupal.adminUser | quote }}
+            - name: DRUPAL_PASSWORD
+              value: {{ .Values.drupal.adminPassword | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- else }}
+{{- fail "appType must be wordpress or drupal" }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.appType }}-service
+spec:
+  ports:
+    - port: 80
+      {{- if eq .Values.appType "drupal" }}
+      targetPort: 8080
+      {{- else }}
+      targetPort: 80
+      {{- end }}
+      name: http
+  selector:
+    app: {{ .Values.appType }}

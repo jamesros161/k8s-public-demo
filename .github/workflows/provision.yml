@@ -1,0 +1,202 @@
+name: Cluster - Provision
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openstack-terraform-provision
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    uses: ./.github/workflows/validate-configuration.yml
+    with:
+      scenario: provision
+    secrets: inherit
+
+  provision:
+    needs: validate
+    runs-on: ubuntu-latest
+    # Magnum + Octavia LB can exceed 3h on slow clouds; override via workflow if your org allows longer jobs.
+    timeout-minutes: 360
+    env:
+      OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
+      OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
+      OS_INTERFACE: ${{ vars.OS_INTERFACE }}
+      OS_IDENTITY_API_VERSION: ${{ vars.OS_IDENTITY_API_VERSION }}
+      OS_AUTH_TYPE: ${{ vars.OS_AUTH_TYPE }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      # Do NOT set OS_PROJECT_ID with application credentials (Keystone scope error).
+      # Optional: reuse an existing Neutron router when External has no free gateway IPs (see README).
+      TF_VAR_attach_to_existing_router_id: ${{ vars.EXISTING_ROUTER_ID }}
+      # Optional: reuse a pre-created tenant network if Neutron deletes new networks (DELETED state); or set NETWORK_NAME_SUFFIX to bust name collisions.
+      TF_VAR_existing_network_id: ${{ vars.EXISTING_NETWORK_ID }}
+      TF_VAR_network_name_suffix: ${{ vars.NETWORK_NAME_SUFFIX }}
+      # Magnum template must reference a Glance image visible to your project.
+      TF_VAR_cluster_template_name: ${{ vars.CLUSTER_TEMPLATE_NAME != '' && vars.CLUSTER_TEMPLATE_NAME || 'kubernetes-v1.26.8-rancher1' }}
+      # Set repository Variable CLUSTER_AUTOSCALING_ENABLED to false to disable autoscaler labels (fixed worker count).
+      TF_VAR_cluster_autoscaling_enabled: ${{ vars.CLUSTER_AUTOSCALING_ENABLED || 'true' }}
+      # If LoadBalancer EXTERNAL-IP stays pending (Octavia / cloud-controller), set to NodePort for a working demo (see README).
+      TRAEFIK_SERVICE_TYPE: ${{ vars.TRAEFIK_SERVICE_TYPE }}
+      # Required for Traefik ACME / Let's Encrypt (set in repository Variables).
+      LETSENCRYPT_EMAIL: ${{ vars.LETSENCRYPT_EMAIL }}
+      # Set to "true" to use Let's Encrypt staging CA (fake certs; avoids rate limits while testing).
+      LETSENCRYPT_USE_STAGING: ${{ vars.LETSENCRYPT_USE_STAGING }}
+      # Terraform remote state on Swift (S3 API) — must match versions.tf backend "s3" {}
+      TF_STATE_S3_BUCKET: ${{ vars.TF_STATE_S3_BUCKET }}
+      TF_STATE_S3_KEY: ${{ vars.TF_STATE_S3_KEY }}
+      TF_STATE_S3_ENDPOINT: ${{ vars.TF_STATE_S3_ENDPOINT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_S3_SECRET_ACCESS_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Keystone rejects trust creation when the trustor token used application_credential auth.
+      # If secrets TERRAFORM_OPENSTACK_USERNAME + TERRAFORM_OPENSTACK_PASSWORD are set, switch this job to password auth (see README).
+      - name: Select OpenStack auth (app cred or password for Magnum trust)
+        run: bash scripts/configure-gha-openstack-auth.sh
+        env:
+          TERRAFORM_OPENSTACK_USERNAME: ${{ secrets.TERRAFORM_OPENSTACK_USERNAME }}
+          TERRAFORM_OPENSTACK_PASSWORD: ${{ secrets.TERRAFORM_OPENSTACK_PASSWORD }}
+          TERRAFORM_OPENSTACK_PROJECT_ID: ${{ vars.TERRAFORM_OPENSTACK_PROJECT_ID }}
+          TERRAFORM_OPENSTACK_USER_DOMAIN_NAME: ${{ vars.TERRAFORM_OPENSTACK_USER_DOMAIN_NAME }}
+          TERRAFORM_OPENSTACK_PROJECT_DOMAIN_ID: ${{ vars.TERRAFORM_OPENSTACK_PROJECT_DOMAIN_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install OpenStack CLI (Magnum)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "python-openstackclient" "python-magnumclient"
+          echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
+
+      - name: Write Terraform S3 backend config (Swift)
+        run: bash scripts/write-terraform-s3-backend-ci.sh
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init -backend-config=backend.auto.hcl
+
+      - name: Terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve
+
+      - name: Wait for Magnum cluster
+        working-directory: terraform
+        run: |
+          set -euo pipefail
+          CLUSTER="$(terraform output -raw cluster_name)"
+          echo "Waiting for cluster: $CLUSTER"
+          for i in $(seq 1 90); do
+            STATUS="$(openstack coe cluster show "$CLUSTER" -c status -f value 2>/dev/null || echo UNKNOWN)"
+            echo "[$i] status=$STATUS"
+            if [ "$STATUS" = "CREATE_COMPLETE" ]; then
+              exit 0
+            fi
+            if [ "$STATUS" = "CREATE_FAILED" ] || [ "$STATUS" = "DELETE_COMPLETE" ] || [ "$STATUS" = "DELETE_FAILED" ]; then
+              openstack coe cluster show "$CLUSTER" || true
+              exit 1
+            fi
+            sleep 60
+          done
+          echo "Timeout waiting for cluster"
+          exit 1
+
+      - name: Fetch kubeconfig
+        working-directory: terraform
+        run: |
+          CLUSTER="$(terraform output -raw cluster_name)"
+          mkdir -p "$HOME/.kube"
+          openstack coe cluster config "$CLUSTER" --dir "$HOME/.kube"
+          chmod 600 "$HOME/.kube/config"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      # Before this, Provision only waited for nodes — Flannel stuck on Quay never became Ready, so the job timed out.
+      # Patch runs as soon as kube-flannel-ds exists (still before nodes are Ready). See README Flannel / Quay.
+      - name: Patch Flannel (Quay → Docker Hub)
+        if: ${{ vars.SKIP_FLANNEL_QUAY_PATCH != 'true' }}
+        env:
+          # Set repository Variable FLANNEL_PATCH_MAIN_IMAGE=true if quay.io/coreos/flannel also fails (see README).
+          PATCH_FLANNEL_MAIN: ${{ vars.FLANNEL_PATCH_MAIN_IMAGE }}
+        run: bash scripts/patch-flannel-quay-to-dockerhub.sh
+
+      # OpenStack CCM refuses LoadBalancer Services until at least one node is Ready and eligible
+      # (workers; control-plane nodes are often excluded). Without this, Traefik EXTERNAL-IP stays pending for hours.
+      - name: Wait for Kubernetes nodes Ready
+        run: |
+          set -euo pipefail
+          kubectl get nodes -o wide || true
+          echo "Waiting for nodes Ready (required before LoadBalancer can be created)..."
+          kubectl wait --for=condition=Ready nodes --all --timeout=45m
+          kubectl get nodes -o wide
+
+      - name: Install Traefik
+        run: |
+          set -euo pipefail
+          ST="${TRAEFIK_SERVICE_TYPE:-LoadBalancer}"
+          if [ -z "$ST" ]; then ST=LoadBalancer; fi
+          echo "Traefik service type: $ST"
+          EMAIL="${LETSENCRYPT_EMAIL:-}"
+          if [ -z "${EMAIL}" ]; then
+            echo "::error::Set repository Variable LETSENCRYPT_EMAIL (Let's Encrypt registration / expiry notices)."
+            exit 1
+          fi
+          helm repo add traefik https://traefik.github.io/charts
+          helm repo update
+          # Always set caServer: Helm upgrades otherwise keep a previous staging URL if you once set LETSENCRYPT_USE_STAGING=true.
+          HELM_EXTRA=()
+          if [ "${LETSENCRYPT_USE_STAGING:-}" = "true" ]; then
+            echo "Using Let's Encrypt STAGING CA (certs will not be trusted by browsers)."
+            HELM_EXTRA+=(--set-string "certificatesResolvers.letsencrypt.acme.caServer=https://acme-staging-v02.api.letsencrypt.org/directory")
+          else
+            HELM_EXTRA+=(--set-string "certificatesResolvers.letsencrypt.acme.caServer=https://acme-v02.api.letsencrypt.org/directory")
+          fi
+          helm upgrade --install traefik traefik/traefik \
+            --namespace traefik \
+            --create-namespace \
+            --set "service.type=${ST}" \
+            -f helm/traefik-values.yaml \
+            --set-string "certificatesResolvers.letsencrypt.acme.email=${EMAIL}" \
+            "${HELM_EXTRA[@]}" \
+            --wait \
+            --timeout 30m
+
+      - name: Show Traefik service (get LB VIP or NodePorts)
+        run: |
+          kubectl get svc -n traefik traefik -o wide
+          ST="${TRAEFIK_SERVICE_TYPE:-LoadBalancer}"
+          if [ -z "$ST" ]; then ST=LoadBalancer; fi
+          if [ "$ST" != "LoadBalancer" ]; then
+            echo "::notice::Traefik uses ${ST}. For NodePort, reach the app via any node IP and the HTTP/HTTPS node ports above (wildcard DNS does not apply unless you front it with another LB)."
+          fi
+
+      - name: Upload Terraform state snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-state-snapshot
+          path: |
+            terraform/terraform.tfstate
+            terraform/.terraform.lock.hcl
+          if-no-files-found: warn

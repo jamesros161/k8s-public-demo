@@ -1,0 +1,126 @@
+name: Scaling - Burst Up
+
+# Installs many Drupal stacks via Helm only (no Drush wait, no drupal-admin Secret).
+# Each site’s app pod requests 512Mi (see helm/site-template/values.yaml); MariaDB pods
+# have no requests in the chart. Default site_count is sized so app requests exceed
+# ~8 GiB across two 4GB nodes, which tends to leave Pods pending and trigger Magnum CA.
+
+on:
+  workflow_dispatch:
+    inputs:
+      site_count:
+        description: Number of Drupal sites (Helm releases) to install
+        required: false
+        default: "24"
+        type: string
+      helm_parallel:
+        description: Concurrent helm upgrade --install processes
+        required: false
+        default: "10"
+        type: string
+      wait_timeout_minutes:
+        description: Max time to wait after Helm for nodes + burst sites (MariaDB + Drupal Available)
+        required: false
+        default: "40"
+        type: string
+      poll_interval_seconds:
+        description: Seconds between status log groups while waiting
+        required: false
+        default: "15"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/validate-configuration.yml
+    with:
+      scenario: site-deploy
+    secrets: inherit
+
+  burst:
+    needs: validate
+    runs-on: ubuntu-latest
+    # Helm burst + wait for scale-up and all Drupal/MariaDB rollouts
+    timeout-minutes: 75
+    env:
+      OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
+      OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
+      OS_INTERFACE: ${{ vars.OS_INTERFACE }}
+      OS_IDENTITY_API_VERSION: ${{ vars.OS_IDENTITY_API_VERSION }}
+      OS_AUTH_TYPE: ${{ vars.OS_AUTH_TYPE }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install OpenStack CLI (Magnum)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "python-openstackclient" "python-magnumclient"
+          echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve cluster name
+        id: cluster
+        run: |
+          C="${CLUSTER_NAME}"
+          if [ -z "$C" ]; then C="vpc-demo-cluster"; fi
+          echo "name=$C" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          openstack coe cluster config "${{ steps.cluster.outputs.name }}" --dir "$HOME/.kube"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Parallel Drupal Helm installs (no Drush)
+        env:
+          SITE_COUNT: ${{ inputs.site_count }}
+          HELM_PARALLEL: ${{ inputs.helm_parallel }}
+          RUN_ID: ${{ github.run_id }}
+          DOMAIN_BASE: ${{ vars.DEMO_DOMAIN_BASE }}
+          DB_PASS: ${{ secrets.DEMO_DB_PASSWORD }}
+          DB_ROOT: ${{ secrets.DEMO_DB_ROOT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DB_PASS}" ] || [ -z "${DB_ROOT}" ]; then
+            echo "::error::DEMO_DB_PASSWORD and DEMO_DB_ROOT_PASSWORD must be set (same as Site - Deploy)."
+            exit 1
+          fi
+          DP="$(openssl rand -base64 24 | tr -d '\n')"
+          echo "::add-mask::${DP}"
+          export DRUPAL_ADMIN_PASSWORD="${DP}"
+          bash scripts/scale-deploy-drupal-sites.sh
+
+      - name: Wait for autoscaling and burst sites ready
+        env:
+          RUN_ID: ${{ github.run_id }}
+          EXPECTED_SITE_COUNT: ${{ inputs.site_count }}
+          WAIT_TIMEOUT_MINUTES: ${{ inputs.wait_timeout_minutes }}
+          POLL_SECONDS: ${{ inputs.poll_interval_seconds }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${WAIT_TIMEOUT_MINUTES}" =~ ^[1-9][0-9]*$ ]] || ! [[ "${POLL_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::wait_timeout_minutes and poll_interval_seconds must be positive integers."
+            exit 1
+          fi
+          export MAX_WAIT_SECONDS=$((WAIT_TIMEOUT_MINUTES * 60))
+          echo "::notice::Polling nodes, Pending burst pods, and MariaDB/Drupal readiness until all match or timeout (${MAX_WAIT_SECONDS}s max)."
+          bash scripts/wait-burst-drupal-ready.sh

@@ -1,0 +1,126 @@
+name: Dashboards - Deploy Headlamp
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: Kubernetes namespace for Headlamp
+        required: true
+        default: headlamp
+        type: string
+      chart_version:
+        description: Headlamp Helm chart version (leave empty for latest)
+        required: false
+        default: ""
+        type: string
+      ingress_class:
+        description: IngressClass name for Traefik
+        required: false
+        default: traefik
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/validate-configuration.yml
+    with:
+      scenario: core
+    secrets: inherit
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
+      OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
+      OS_INTERFACE: ${{ vars.OS_INTERFACE }}
+      OS_IDENTITY_API_VERSION: ${{ vars.OS_IDENTITY_API_VERSION }}
+      OS_AUTH_TYPE: ${{ vars.OS_AUTH_TYPE }}
+      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
+      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
+      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+      DEMO_DOMAIN_BASE: ${{ vars.DEMO_DOMAIN_BASE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install OpenStack CLI (Magnum)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "python-openstackclient" "python-magnumclient"
+          echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve cluster name
+        id: cluster
+        run: |
+          C="${CLUSTER_NAME}"
+          if [ -z "$C" ]; then C="vpc-demo-cluster"; fi
+          echo "name=$C" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          openstack coe cluster config "${{ steps.cluster.outputs.name }}" --dir "$HOME/.kube"
+          chmod 600 "$HOME/.kube/config"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Resolve Headlamp hostname
+        id: headlamp
+        run: |
+          set -euo pipefail
+          DOMAIN_BASE="${DEMO_DOMAIN_BASE:-k8sdemo.example.com}"
+          echo "host=headlamp.${DOMAIN_BASE}" >> "$GITHUB_OUTPUT"
+          echo "Headlamp Ingress host will be: headlamp.${DOMAIN_BASE}"
+
+      - name: Helm upgrade (Headlamp)
+        env:
+          NS: ${{ inputs.namespace }}
+          CHART_VERSION: ${{ inputs.chart_version }}
+          INGRESS_HOST: ${{ steps.headlamp.outputs.host }}
+          INGRESS_CLASS: ${{ inputs.ingress_class }}
+        run: |
+          set -euo pipefail
+          helm repo add headlamp https://kubernetes-sigs.github.io/headlamp/ || true
+          helm repo update
+          ARGS=(
+            upgrade --install headlamp headlamp/headlamp
+            --namespace "$NS"
+            --create-namespace
+            --wait
+            --timeout 15m
+            --set ingress.enabled=true
+            --set-string "ingress.ingressClassName=${INGRESS_CLASS}"
+            --set-json "ingress.hosts=[{\"host\":\"${INGRESS_HOST}\",\"paths\":[{\"path\":\"/\",\"type\":\"Prefix\"}]}]"
+            --set-json 'ingress.annotations={"traefik.ingress.kubernetes.io/router.entrypoints":"websecure","traefik.ingress.kubernetes.io/router.tls.certresolver":"letsencrypt"}'
+          )
+          if [ -n "${CHART_VERSION}" ]; then
+            ARGS+=(--version "${CHART_VERSION}")
+          fi
+          helm "${ARGS[@]}"
+
+      - name: Access hints
+        env:
+          NS: ${{ inputs.namespace }}
+          INGRESS_HOST: ${{ steps.headlamp.outputs.host }}
+        run: |
+          set -euo pipefail
+          kubectl get svc,ingress -n "$NS" -o wide 2>/dev/null || kubectl get svc -n "$NS" -o wide
+          echo ""
+          echo "::notice::Headlamp URL: https://${INGRESS_HOST}/ — HTTP redirects to HTTPS at Traefik; ensure DNS points at the Traefik LB before Let's Encrypt can issue. Auth: https://headlamp.dev/docs/latest/installation/"
