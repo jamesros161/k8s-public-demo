@@ -1,4 +1,4 @@
-name: Scaling - Tune cluster autoscaler
+name: 6 - Tune cluster autoscaler
 
 # Patches the cluster-autoscaler Deployment in kube-system so nodes drain sooner after
 # you delete burst workloads. Magnum does not expose these timers via Terraform labels

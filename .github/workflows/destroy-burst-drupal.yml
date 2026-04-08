@@ -1,4 +1,4 @@
-name: Scaling - Burst Down
+name: 7 - Scale down Cluster
 
 # Deletes site namespaces created by "Scaling - Burst Up"
 # (pattern scale-<run_id>-<nnn>-drupal). Removes workloads so the cluster autoscaler

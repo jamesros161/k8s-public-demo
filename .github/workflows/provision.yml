@@ -1,4 +1,4 @@
-name: Cluster - Provision
+name: 2 - Provision Cluster
 
 on:
   workflow_dispatch:

@@ -1,4 +1,4 @@
-name: Site - Destroy
+name: 4 - Destroy Single Site
 
 # Deletes one Site - Deploy stack (namespace {site_id}-wordpress|drupal). Irreversible (PVCs removed).
 
