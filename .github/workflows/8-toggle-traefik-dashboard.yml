@@ -1,4 +1,4 @@
-name: 7 - Toggle Traefik Dashboard
+name: 8 - Toggle Traefik Dashboard
 
 # Enable or disable the built-in Traefik dashboard IngressRoute on websecure (Let's Encrypt).
 # The dashboard is unauthenticated when enabled — suitable for short-lived demos only.

@@ -1,4 +1,4 @@
-name: Cluster - Destroy
+name: 11 - Destroy Full Cluster
 
 on:
   workflow_dispatch:

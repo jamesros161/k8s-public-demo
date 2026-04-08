@@ -1,4 +1,4 @@
-name: 5 - Scale up Cluster
+name: 6 - Scale up Cluster
 
 # Installs many Drupal stacks via Helm only (no Drush wait, no drupal-admin Secret).
 # Each site’s app pod requests 512Mi (see helm/site-template/values.yaml); MariaDB pods

@@ -1,30 +1,26 @@
-name: 6 - Tune cluster autoscaler
+name: 10 - Destroy All Sites
 
-# Patches the cluster-autoscaler Deployment in kube-system so nodes drain sooner after
-# you delete burst workloads. Magnum does not expose these timers via Terraform labels
-# in this repo; the running autoscaler pod args must be updated.
-#
-# Defaults (2m) are faster than typical upstream (~10m) but avoid sub-minute values that
-# can upset Magnum/Heat. Re-run Provision or cluster upgrades may replace this Deployment.
+# Deletes every *-wordpress / *-drupal namespace from Site - Deploy. Does not remove Scaling - Burst Up
+# namespaces (scale-<run_id>-<nnn>-drupal). Irreversible.
 
 on:
   workflow_dispatch:
     inputs:
-      scale_down_unneeded_time:
-        description: "--scale-down-unneeded-time (how long a node must be unneeded before removal)"
+      destroy_confirmation:
+        description: |
+          Irreversible: deletes all customer site namespaces (*-wordpress / *-drupal) except burst demos.
+          Ignored when dry_run is true. To proceed, choose delete-all-customer-sites-confirm.
+        required: true
+        type: choice
+        default: cancel
+        options:
+          - cancel
+          - delete-all-customer-sites-confirm
+      dry_run:
+        description: List matching namespaces only; do not delete (no confirmation required)
         required: false
-        default: "2m"
-        type: string
-      scale_down_delay_after_add:
-        description: "--scale-down-delay-after-add (quiet period after a scale-up)"
-        required: false
-        default: "2m"
-        type: string
-      deployment_name:
-        description: "Optional kube-system Deployment name (leave empty to auto-detect cluster-autoscaler)"
-        required: false
-        default: ""
-        type: string
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -36,10 +32,10 @@ jobs:
       scenario: core
     secrets: inherit
 
-  patch-autoscaler:
+  destroy-all:
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
       OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
@@ -76,24 +72,24 @@ jobs:
         run: |
           mkdir -p "$HOME/.kube"
           openstack coe cluster config "${{ steps.cluster.outputs.name }}" --dir "$HOME/.kube"
+          chmod 600 "$HOME/.kube/config"
           echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
-      - name: Patch cluster-autoscaler scale-down timers
-        id: autoscaler
-        env:
-          SCALE_DOWN_UNNEEDED_TIME: ${{ inputs.scale_down_unneeded_time }}
-          SCALE_DOWN_DELAY_AFTER_ADD: ${{ inputs.scale_down_delay_after_add }}
-          CA_DEPLOY_NAME: ${{ inputs.deployment_name }}
+      - name: Require explicit confirmation
+        if: ${{ !inputs.dry_run }}
         run: |
-          set -euo pipefail
-          python3 scripts/patch-cluster-autoscaler-scale-down.py
+          if [ "${{ inputs.destroy_confirmation }}" != "delete-all-customer-sites-confirm" ]; then
+            echo "::notice::Cancelled — leave confirmation on **cancel** to abort, or enable **dry_run** to list namespaces only."
+            exit 1
+          fi
+          echo "Confirmation accepted; deleting all matched customer site namespaces."
 
-      - name: Rollout status
+      - name: Destroy all customer site namespaces
+        env:
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: |
           set -euo pipefail
-          D="${{ steps.autoscaler.outputs.ca_deploy_name }}"
-          echo "Waiting for rollout: kube-system/${D}"
-          kubectl rollout status "deploy/${D}" -n kube-system --timeout=300s
+          bash scripts/destroy-all-customer-sites.sh
