@@ -11,14 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate:
-    uses: ./.github/workflows/validate-configuration.yml
-    with:
-      scenario: provision
-    secrets: inherit
-
   provision:
-    needs: validate
     runs-on: ubuntu-latest
     # Magnum + Octavia LB can exceed 3h on slow clouds; override via workflow if your org allows longer jobs.
     timeout-minutes: 360

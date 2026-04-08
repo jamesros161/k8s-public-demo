@@ -31,7 +31,7 @@ If something fails after configuration looks correct (networking, Magnum, load b
 
 The **Validate configuration** workflow checks that required **Variables** and **Secrets** are present, flags common mistakes (for example whitespace in UUIDs), and optionally runs **`openstack token issue`** and **`openstack coe cluster template list`** against your cloud.
 
-It runs **automatically as the first job** before the other workflows in this repo, so a missing secret fails fast with a clear message. You can also run it on demand from the **Actions** tab.
+Run it **manually** from the **Actions** tab when you change secrets or before a long job (pick the **scenario** that matches what you plan to run next). Other workflows do **not** run validation automatically.
 
 ---
 
@@ -110,7 +110,7 @@ Do **not** leave these empty: blank secrets override chart defaults and break Ma
 
 | Workflow | Purpose |
 |----------|---------|
-| **Validate configuration** | Check Variables/Secrets and OpenStack connectivity (also runs first in other workflows). |
+| **Validate configuration** | Check Variables/Secrets and OpenStack connectivity (standalone; run when needed). |
 | **Cluster - Provision** | Terraform apply, wait for Magnum, kubeconfig, Traefik + ACME. |
 | **Cluster - Destroy** | Confirm with `destroy-infra-confirm`; tears down Terraform-managed resources. |
 | **Site - Deploy** | Deploy WordPress or Drupal: **subdomain** (DNS label), app type, admin username, admin password. |

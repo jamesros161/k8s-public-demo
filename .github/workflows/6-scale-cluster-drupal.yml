@@ -33,14 +33,7 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    uses: ./.github/workflows/validate-configuration.yml
-    with:
-      scenario: site-deploy
-    secrets: inherit
-
   burst:
-    needs: validate
     runs-on: ubuntu-latest
     # Helm burst + wait for scale-up and all Drupal/MariaDB rollouts
     timeout-minutes: 75

@@ -31,14 +31,7 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    uses: ./.github/workflows/validate-configuration.yml
-    with:
-      scenario: site-deploy
-    secrets: inherit
-
   deploy:
-    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

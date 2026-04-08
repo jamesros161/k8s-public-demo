@@ -18,15 +18,6 @@ on:
         description: Attempt a real OpenStack token (recommended)
         type: boolean
         default: true
-  workflow_call:
-    inputs:
-      scenario:
-        required: true
-        type: string
-      run_openstack_check:
-        required: false
-        type: boolean
-        default: true
 
 permissions:
   contents: read

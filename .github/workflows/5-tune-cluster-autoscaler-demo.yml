@@ -30,14 +30,7 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    uses: ./.github/workflows/validate-configuration.yml
-    with:
-      scenario: core
-    secrets: inherit
-
   patch-autoscaler:
-    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

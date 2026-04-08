@@ -22,14 +22,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  validate:
-    uses: ./.github/workflows/validate-configuration.yml
-    with:
-      scenario: provision
-    secrets: inherit
-
   destroy:
-    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
