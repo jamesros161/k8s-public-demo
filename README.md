@@ -49,6 +49,7 @@ The provision workflow also requires cluster build keys in the bundle:
 - `KUBECONFIG_ARTIFACT_PASSPHRASE` (encrypt kubeconfig artifact)
 - `TF_VAR_k8s_worker_count`, `TF_VAR_k8s_worker_max_count` (autoscaler min/max defaults; names are auto-derived from `TF_VAR_cluster_name`)
 - Optional Cinder CSI tuning: `CINDER_CSI_CHART_VERSION`, `CINDER_CSI_STORAGECLASS_NAME`, `CINDER_CSI_SET_DEFAULT_SC`
+- Optional autoscaler image pin: `CLUSTER_AUTOSCALER_IMAGE_REPOSITORY`, `CLUSTER_AUTOSCALER_IMAGE_TAG`
 
 ## Workflows
 

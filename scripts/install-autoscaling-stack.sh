@@ -3,6 +3,11 @@ set -euo pipefail
 
 METRICS_SERVER_CHART_VERSION="${METRICS_SERVER_CHART_VERSION:-}"
 CLUSTER_AUTOSCALER_CHART_VERSION="${CLUSTER_AUTOSCALER_CHART_VERSION:-}"
+CLUSTER_AUTOSCALER_IMAGE_REPOSITORY="${CLUSTER_AUTOSCALER_IMAGE_REPOSITORY:-registry.k8s.io/autoscaling/cluster-autoscaler}"
+K8S_REPO_CHANNEL="${TF_VAR_k8s_repo_channel:-v1.29}"
+K8S_MINOR="$(echo "${K8S_REPO_CHANNEL}" | sed -E 's/^v?([0-9]+\.[0-9]+).*/\1/')"
+DEFAULT_CA_IMAGE_TAG="v${K8S_MINOR}.0"
+CLUSTER_AUTOSCALER_IMAGE_TAG="${CLUSTER_AUTOSCALER_IMAGE_TAG:-${DEFAULT_CA_IMAGE_TAG}}"
 AS_CLUSTER_NAME_RAW="${AS_CLUSTER_NAME:-${TF_VAR_cluster_name:-vpc-demo-cluster}}"
 AS_CLUSTER_NAME="$(echo "${AS_CLUSTER_NAME_RAW}" | tr '[:upper:]' '[:lower:]')"
 AS_GROUP_NAME="${AS_GROUP_NAME:-${AS_CLUSTER_NAME}-worker}"
@@ -20,6 +25,7 @@ if [ "${AS_NODES_MIN_SIZE}" -gt "${AS_NODES_MAX_SIZE}" ]; then
 fi
 
 echo "::notice::Autoscaler config: cluster=${AS_CLUSTER_NAME} group=${AS_GROUP_NAME} min=${AS_NODES_MIN_SIZE} max=${AS_NODES_MAX_SIZE}"
+echo "::notice::Autoscaler image: ${CLUSTER_AUTOSCALER_IMAGE_REPOSITORY}:${CLUSTER_AUTOSCALER_IMAGE_TAG}"
 
 helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ >/dev/null 2>&1 || true
 helm repo add autoscaler https://kubernetes.github.io/autoscaler >/dev/null 2>&1 || true
@@ -60,6 +66,9 @@ extraArgs:
   balance-similar-node-groups: "true"
   skip-nodes-with-local-storage: "false"
   expander: least-waste
+image:
+  repository: "${CLUSTER_AUTOSCALER_IMAGE_REPOSITORY}"
+  tag: "${CLUSTER_AUTOSCALER_IMAGE_TAG}"
 EOF
 
 CA_ARGS=(
