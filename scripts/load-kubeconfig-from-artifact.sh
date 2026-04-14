@@ -16,6 +16,8 @@ if [ -z "${KUBECONFIG_ARTIFACT_PASSPHRASE:-}" ]; then
   exit 1
 fi
 
+OPTIONAL_MODE="${LOAD_KUBECONFIG_ARTIFACT_OPTIONAL:-false}"
+
 ARTIFACT_ID="$(
   gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" --paginate \
     --jq '.artifacts[] | select(.expired == false and (.name | startswith("kubeconfig-encrypted-"))) | "\(.created_at)\t\(.id)"' \
@@ -25,6 +27,10 @@ ARTIFACT_ID="$(
 )"
 
 if [ -z "${ARTIFACT_ID}" ]; then
+  if [ "${OPTIONAL_MODE}" = "true" ]; then
+    echo "::notice::No non-expired kubeconfig-encrypted-* artifact found; continuing without kubeconfig."
+    exit 0
+  fi
   echo "::error::No non-expired kubeconfig-encrypted-* artifact found."
   exit 1
 fi

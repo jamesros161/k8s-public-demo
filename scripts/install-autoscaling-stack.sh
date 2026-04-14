@@ -3,7 +3,8 @@ set -euo pipefail
 
 METRICS_SERVER_CHART_VERSION="${METRICS_SERVER_CHART_VERSION:-}"
 CLUSTER_AUTOSCALER_CHART_VERSION="${CLUSTER_AUTOSCALER_CHART_VERSION:-}"
-AS_CLUSTER_NAME="${AS_CLUSTER_NAME:-${TF_VAR_cluster_name:-vpc-demo-cluster}}"
+AS_CLUSTER_NAME_RAW="${AS_CLUSTER_NAME:-${TF_VAR_cluster_name:-vpc-demo-cluster}}"
+AS_CLUSTER_NAME="$(echo "${AS_CLUSTER_NAME_RAW}" | tr '[:upper:]' '[:lower:]')"
 AS_GROUP_NAME="${AS_GROUP_NAME:-${AS_CLUSTER_NAME}-worker}"
 AS_NODES_MIN_SIZE="${AS_NODES_MIN_SIZE:-${TF_VAR_k8s_worker_count:-2}}"
 AS_NODES_MAX_SIZE="${AS_NODES_MAX_SIZE:-${TF_VAR_k8s_worker_max_count:-${AS_NODES_MIN_SIZE}}}"

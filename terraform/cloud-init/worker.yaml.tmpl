@@ -1,4 +1,6 @@
 #cloud-config
+hostname: ${node_hostname}
+preserve_hostname: false
 package_update: true
 package_upgrade: false
 runcmd:
@@ -24,7 +26,7 @@ runcmd:
   - systemctl enable containerd
   - |
     for i in $(seq 1 90); do
-      kubeadm join ${control_plane_private_ip}:6443 --token ${k8s_join_token} --discovery-token-unsafe-skip-ca-verification && exit 0
+      kubeadm join ${control_plane_private_ip}:6443 --token ${k8s_join_token} --node-name ${node_hostname} --discovery-token-unsafe-skip-ca-verification && exit 0
       sleep 20
     done
     exit 1

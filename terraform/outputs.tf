@@ -29,12 +29,12 @@ output "control_plane_server_id" {
 
 output "autoscaler_cluster_name" {
   description = "Derived cluster-autoscaler cluster name."
-  value       = var.cluster_name
+  value       = local.cluster_name_norm
 }
 
 output "autoscaler_group_name" {
   description = "Derived cluster-autoscaler worker group name."
-  value       = "${var.cluster_name}-worker"
+  value       = "${local.cluster_name_norm}-worker"
 }
 
 output "autoscaler_nodes_min_size" {

@@ -5,6 +5,7 @@ data "openstack_networking_network_v2" "external" {
 locals {
   existing_network_id_trim          = trimspace(var.existing_network_id)
   attach_to_existing_router_id_trim = trimspace(var.attach_to_existing_router_id)
+  cluster_name_norm                 = lower(trimspace(var.cluster_name))
   tenant_network_name               = trimspace(var.network_name_suffix) != "" ? "${var.demo_network_name}-${trimspace(var.network_name_suffix)}" : var.demo_network_name
   # When existing_network_id is set, demo_net is not created; try() avoids indexing [0] when count is 0.
   tenant_network_id        = try(openstack_networking_network_v2.demo_net[0].id, local.existing_network_id_trim)
@@ -54,7 +55,7 @@ resource "openstack_networking_router_interface_v2" "demo_router_interface_exist
 
 resource "openstack_networking_secgroup_v2" "k8s_nodes" {
   count = var.k8s_enabled ? 1 : 0
-  name  = "${var.cluster_name}-k8s-nodes"
+  name  = "${local.cluster_name_norm}-k8s-nodes"
 }
 
 resource "openstack_networking_secgroup_rule_v2" "k8s_ssh_ingress" {
@@ -89,7 +90,7 @@ resource "openstack_networking_secgroup_rule_v2" "k8s_node_internal_ingress" {
 
 resource "openstack_networking_port_v2" "control_plane_port" {
   count              = var.k8s_enabled ? 1 : 0
-  name               = "${var.cluster_name}-cp-1-port"
+  name               = "${local.cluster_name_norm}-cp-1-port"
   network_id         = local.tenant_network_id
   security_group_ids = [openstack_networking_secgroup_v2.k8s_nodes[0].id]
   fixed_ip {
@@ -104,7 +105,7 @@ resource "openstack_networking_port_v2" "control_plane_port" {
 
 resource "openstack_networking_port_v2" "worker_ports" {
   count              = var.k8s_enabled ? var.k8s_worker_count : 0
-  name               = "${var.cluster_name}-worker-${count.index + 1}-port"
+  name               = "${local.cluster_name_norm}-worker-${count.index + 1}-port"
   network_id         = local.tenant_network_id
   security_group_ids = [openstack_networking_secgroup_v2.k8s_nodes[0].id]
   fixed_ip {
@@ -124,7 +125,7 @@ resource "openstack_networking_floatingip_v2" "control_plane_fip" {
 
 resource "openstack_compute_instance_v2" "control_plane" {
   count       = var.k8s_enabled ? 1 : 0
-  name        = "${var.cluster_name}-cp-1"
+  name        = "${local.cluster_name_norm}-cp-1"
   image_name  = var.k8s_image_name
   flavor_name = var.k8s_flavor_name
   key_pair    = local.k8s_keypair_name_trim != "" ? local.k8s_keypair_name_trim : null
@@ -134,6 +135,7 @@ resource "openstack_compute_instance_v2" "control_plane" {
     control_plane_private_ip = local.control_plane_private_ip
     control_plane_public_ip  = openstack_networking_floatingip_v2.control_plane_fip[0].address
     k8s_pod_cidr             = var.k8s_pod_cidr
+    node_hostname            = "${local.cluster_name_norm}-cp-1"
   })
 
   network {
@@ -143,7 +145,7 @@ resource "openstack_compute_instance_v2" "control_plane" {
 
 resource "openstack_compute_instance_v2" "workers" {
   count       = var.k8s_enabled ? var.k8s_worker_count : 0
-  name        = "${var.cluster_name}-worker-${count.index + 1}"
+  name        = "${local.cluster_name_norm}-worker-${count.index + 1}"
   image_name  = var.k8s_image_name
   flavor_name = var.k8s_flavor_name
   key_pair    = local.k8s_keypair_name_trim != "" ? local.k8s_keypair_name_trim : null
@@ -151,6 +153,7 @@ resource "openstack_compute_instance_v2" "workers" {
     k8s_repo_channel         = var.k8s_repo_channel
     k8s_join_token           = var.k8s_join_token
     control_plane_private_ip = local.control_plane_private_ip
+    node_hostname            = "${local.cluster_name_norm}-worker-${count.index + 1}"
   })
 
   network {

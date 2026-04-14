@@ -61,6 +61,7 @@ jobs:
       - name: Load kubeconfig from encrypted artifact
         env:
           GH_TOKEN: ${{ github.token }}
+          LOAD_KUBECONFIG_ARTIFACT_OPTIONAL: "true"
         run: bash scripts/load-kubeconfig-from-artifact.sh
 
       - name: Try remove Traefik (ignore errors)

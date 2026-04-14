@@ -1,4 +1,6 @@
 #cloud-config
+hostname: ${node_hostname}
+preserve_hostname: false
 package_update: true
 package_upgrade: false
 runcmd:
@@ -22,7 +24,7 @@ runcmd:
   - sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
   - systemctl restart containerd
   - systemctl enable containerd
-  - kubeadm init --token ${k8s_join_token} --token-ttl 0 --apiserver-advertise-address ${control_plane_private_ip} --apiserver-cert-extra-sans ${control_plane_public_ip} --pod-network-cidr ${k8s_pod_cidr}
+  - kubeadm init --token ${k8s_join_token} --token-ttl 0 --node-name ${node_hostname} --apiserver-advertise-address ${control_plane_private_ip} --apiserver-cert-extra-sans ${control_plane_public_ip} --pod-network-cidr ${k8s_pod_cidr}
   - mkdir -p /root/.kube
   - cp /etc/kubernetes/admin.conf /root/.kube/config
   - sh -c 'echo "K8S_ADMIN_KUBECONFIG_B64=$(base64 -w0 /etc/kubernetes/admin.conf)"'
