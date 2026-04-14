@@ -14,6 +14,66 @@ AS_GROUP_NAME="${AS_GROUP_NAME:-${AS_CLUSTER_NAME}-worker}"
 AS_NODES_MIN_SIZE="${AS_NODES_MIN_SIZE:-${TF_VAR_k8s_worker_count:-2}}"
 AS_NODES_MAX_SIZE="${AS_NODES_MAX_SIZE:-${TF_VAR_k8s_worker_max_count:-${AS_NODES_MIN_SIZE}}}"
 
+recover_pending_release() {
+  local release="$1"
+  local ns="$2"
+  local status
+  local deployed_rev
+
+  if ! status="$(helm status "${release}" -n "${ns}" -o json 2>/dev/null | jq -r '.info.status // empty')"; then
+    return 0
+  fi
+
+  case "${status}" in
+    pending-install|pending-upgrade|pending-rollback)
+      echo "::warning::Helm release ${release} is in ${status}; attempting recovery."
+      deployed_rev="$(helm history "${release}" -n "${ns}" -o json | jq -r '[.[] | select(.status=="deployed")][-1].revision // empty')"
+      if [ -n "${deployed_rev}" ]; then
+        helm rollback "${release}" "${deployed_rev}" -n "${ns}" --wait --timeout 5m || true
+      else
+        helm uninstall "${release}" -n "${ns}" || true
+      fi
+      ;;
+    *)
+      ;;
+  esac
+}
+
+run_helm_with_retry() {
+  local release="$1"
+  local ns="$2"
+  shift 2
+  local attempt=1
+  local max_attempts=3
+  local output
+
+  while [ "${attempt}" -le "${max_attempts}" ]; do
+    set +e
+    output="$(helm "$@" 2>&1)"
+    rc=$?
+    set -e
+
+    if [ "${rc}" -eq 0 ]; then
+      echo "${output}"
+      return 0
+    fi
+
+    echo "${output}"
+    if echo "${output}" | grep -q "another operation (install/upgrade/rollback) is in progress"; then
+      echo "::warning::Helm release lock detected for ${release} (attempt ${attempt}/${max_attempts})."
+      recover_pending_release "${release}" "${ns}"
+      attempt=$((attempt + 1))
+      sleep 5
+      continue
+    fi
+
+    return "${rc}"
+  done
+
+  echo "::error::Failed Helm operation for ${release} after ${max_attempts} attempts."
+  return 1
+}
+
 if ! [[ "${AS_NODES_MIN_SIZE}" =~ ^[0-9]+$ ]] || ! [[ "${AS_NODES_MAX_SIZE}" =~ ^[0-9]+$ ]]; then
   echo "::error::AS_NODES_MIN_SIZE and AS_NODES_MAX_SIZE must be integers."
   exit 1
@@ -43,7 +103,7 @@ if [ -n "${METRICS_SERVER_CHART_VERSION}" ]; then
   METRICS_ARGS+=(--version "${METRICS_SERVER_CHART_VERSION}")
 fi
 
-helm "${METRICS_ARGS[@]}"
+run_helm_with_retry "metrics-server" "kube-system" "${METRICS_ARGS[@]}"
 echo "::notice::metrics-server installed or updated."
 
 CA_VALUES_FILE="$(mktemp)"
@@ -83,5 +143,5 @@ if [ -n "${CLUSTER_AUTOSCALER_CHART_VERSION}" ]; then
   CA_ARGS+=(--version "${CLUSTER_AUTOSCALER_CHART_VERSION}")
 fi
 
-helm "${CA_ARGS[@]}"
+run_helm_with_retry "cluster-autoscaler" "kube-system" "${CA_ARGS[@]}"
 echo "::notice::cluster-autoscaler installed or updated."
