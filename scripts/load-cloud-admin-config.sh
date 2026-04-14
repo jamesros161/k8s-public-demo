@@ -30,8 +30,8 @@ while IFS= read -r line || [ -n "${line}" ]; do
   value="${line#*=}"
   key="$(echo "${key}" | tr -d '[:space:]')"
 
-  if [[ ! "${key}" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
-    echo "::warning::Skipping invalid env key '${key}'. Use [A-Z0-9_]."
+  if [[ ! "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "::warning::Skipping invalid env key '${key}'. Use [A-Za-z0-9_]."
     continue
   fi
 

@@ -30,9 +30,11 @@ EOF'
   - systemctl restart containerd
   - systemctl enable containerd
   - kubeadm init --token ${k8s_join_token} --token-ttl 0 --apiserver-advertise-address ${control_plane_private_ip} --apiserver-cert-extra-sans ${control_plane_public_ip} --pod-network-cidr ${k8s_pod_cidr}
-  - mkdir -p /home/${k8s_ssh_user}/.kube
-  - cp /etc/kubernetes/admin.conf /home/${k8s_ssh_user}/.kube/config
-  - chown -R ${k8s_ssh_user}:${k8s_ssh_user} /home/${k8s_ssh_user}/.kube
   - mkdir -p /root/.kube
   - cp /etc/kubernetes/admin.conf /root/.kube/config
+  - |
+    echo "BEGIN K8S_ADMIN_KUBECONFIG_B64"
+    base64 -w0 /etc/kubernetes/admin.conf
+    echo
+    echo "END K8S_ADMIN_KUBECONFIG_B64"
   - sh -c 'kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml'

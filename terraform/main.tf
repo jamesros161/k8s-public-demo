@@ -9,6 +9,9 @@ locals {
   # When existing_network_id is set, demo_net is not created; try() avoids indexing [0] when count is 0.
   tenant_network_id        = try(openstack_networking_network_v2.demo_net[0].id, local.existing_network_id_trim)
   control_plane_private_ip = cidrhost(var.demo_subnet_cidr, 10)
+  k8s_keypair_name_trim    = trimspace(var.k8s_keypair_name)
+  k8s_ssh_allowed_cidrs    = distinct([for cidr in split(",", var.k8s_ssh_allowed_cidr) : trimspace(cidr) if trimspace(cidr) != ""])
+  k8s_api_allowed_cidrs    = distinct([for cidr in split(",", var.k8s_api_allowed_cidr) : trimspace(cidr) if trimspace(cidr) != ""])
 }
 
 resource "openstack_networking_network_v2" "demo_net" {
@@ -55,24 +58,24 @@ resource "openstack_networking_secgroup_v2" "k8s_nodes" {
 }
 
 resource "openstack_networking_secgroup_rule_v2" "k8s_ssh_ingress" {
-  count             = var.k8s_enabled ? 1 : 0
+  for_each          = var.k8s_enabled ? { for cidr in local.k8s_ssh_allowed_cidrs : cidr => cidr } : {}
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
   port_range_min    = 22
   port_range_max    = 22
-  remote_ip_prefix  = var.k8s_ssh_allowed_cidr
+  remote_ip_prefix  = each.value
   security_group_id = openstack_networking_secgroup_v2.k8s_nodes[0].id
 }
 
 resource "openstack_networking_secgroup_rule_v2" "k8s_api_ingress" {
-  count             = var.k8s_enabled ? 1 : 0
+  for_each          = var.k8s_enabled ? { for cidr in local.k8s_api_allowed_cidrs : cidr => cidr } : {}
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
   port_range_min    = 6443
   port_range_max    = 6443
-  remote_ip_prefix  = var.k8s_api_allowed_cidr
+  remote_ip_prefix  = each.value
   security_group_id = openstack_networking_secgroup_v2.k8s_nodes[0].id
 }
 
@@ -81,14 +84,6 @@ resource "openstack_networking_secgroup_rule_v2" "k8s_node_internal_ingress" {
   direction         = "ingress"
   ethertype         = "IPv4"
   remote_group_id   = openstack_networking_secgroup_v2.k8s_nodes[0].id
-  security_group_id = openstack_networking_secgroup_v2.k8s_nodes[0].id
-}
-
-resource "openstack_networking_secgroup_rule_v2" "k8s_egress_all" {
-  count             = var.k8s_enabled ? 1 : 0
-  direction         = "egress"
-  ethertype         = "IPv4"
-  remote_ip_prefix  = "0.0.0.0/0"
   security_group_id = openstack_networking_secgroup_v2.k8s_nodes[0].id
 }
 
@@ -132,14 +127,13 @@ resource "openstack_compute_instance_v2" "control_plane" {
   name        = "${var.cluster_name}-cp-1"
   image_name  = var.k8s_image_name
   flavor_name = var.k8s_flavor_name
-  key_pair    = var.k8s_keypair_name
+  key_pair    = local.k8s_keypair_name_trim != "" ? local.k8s_keypair_name_trim : null
   user_data = templatefile("${path.module}/cloud-init/control-plane.yaml.tmpl", {
     k8s_repo_channel         = var.k8s_repo_channel
     k8s_join_token           = var.k8s_join_token
     control_plane_private_ip = local.control_plane_private_ip
     control_plane_public_ip  = openstack_networking_floatingip_v2.control_plane_fip[0].address
     k8s_pod_cidr             = var.k8s_pod_cidr
-    k8s_ssh_user             = var.k8s_ssh_user
   })
 
   network {
@@ -152,7 +146,7 @@ resource "openstack_compute_instance_v2" "workers" {
   name        = "${var.cluster_name}-worker-${count.index + 1}"
   image_name  = var.k8s_image_name
   flavor_name = var.k8s_flavor_name
-  key_pair    = var.k8s_keypair_name
+  key_pair    = local.k8s_keypair_name_trim != "" ? local.k8s_keypair_name_trim : null
   user_data = templatefile("${path.module}/cloud-init/worker.yaml.tmpl", {
     k8s_repo_channel         = var.k8s_repo_channel
     k8s_join_token           = var.k8s_join_token

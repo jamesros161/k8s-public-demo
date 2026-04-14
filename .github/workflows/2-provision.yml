@@ -38,16 +38,15 @@ jobs:
           python -m pip install "python-openstackclient"
           echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
 
-      - name: Create ephemeral OpenStack keypair for provisioning
+      - name: Map bundle vars to Terraform TF_VAR_* inputs
         run: |
           set -euo pipefail
-          KEY_FILE="$RUNNER_TEMP/k8s_ephemeral_key"
-          ssh-keygen -t ed25519 -N "" -f "$KEY_FILE" -C "gha-${GITHUB_RUN_ID}" >/dev/null
-          KEYPAIR_NAME="${K8S_KEYPAIR_NAME_PREFIX:-k8s-demo-ephemeral}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          openstack keypair create --public-key "${KEY_FILE}.pub" "$KEYPAIR_NAME" >/dev/null
-          echo "K8S_SSH_PRIVATE_KEY_PATH=${KEY_FILE}" >> "$GITHUB_ENV"
-          echo "TF_VAR_k8s_keypair_name=${KEYPAIR_NAME}" >> "$GITHUB_ENV"
-          echo "OS_KEYPAIR_NAME_CREATED=${KEYPAIR_NAME}" >> "$GITHUB_ENV"
+          if [ -z "${K8S_IMAGE_NAME:-}" ] || [ -z "${K8S_FLAVOR_NAME:-}" ]; then
+            echo "::error::K8S_IMAGE_NAME and K8S_FLAVOR_NAME must be set in CLOUD_ADMIN_CONFIG_B64."
+            exit 1
+          fi
+          echo "TF_VAR_k8s_image_name=${K8S_IMAGE_NAME}" >> "$GITHUB_ENV"
+          echo "TF_VAR_k8s_flavor_name=${K8S_FLAVOR_NAME}" >> "$GITHUB_ENV"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -65,32 +64,43 @@ jobs:
         working-directory: terraform
         run: terraform apply -auto-approve
 
-      - name: Fetch kubeconfig from control-plane
+      - name: Fetch kubeconfig from control-plane console log
         working-directory: terraform
         run: |
           set -euo pipefail
           CP_FIP="$(terraform output -raw control_plane_floating_ip)"
-          SSH_USER="${K8S_SSH_USER:-ubuntu}"
+          CP_SERVER_ID="$(terraform output -raw control_plane_server_id)"
           if [ -z "${CP_FIP}" ]; then
             echo "::error::control_plane_floating_ip output is empty. Check Terraform cluster resources."
             exit 1
           fi
-          KEY_FILE="${K8S_SSH_PRIVATE_KEY_PATH:-}"
-          if [ -z "${KEY_FILE}" ] || [ ! -f "${KEY_FILE}" ]; then
-            echo "::error::Ephemeral private key file is missing."
+          if [ -z "${CP_SERVER_ID}" ]; then
+            echo "::error::control_plane_server_id output is empty. Check Terraform cluster resources."
             exit 1
           fi
 
-          for i in $(seq 1 90); do
-            if ssh -i "${KEY_FILE}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${SSH_USER}@${CP_FIP}" "sudo test -f /etc/kubernetes/admin.conf"; then
-              echo "kubeconfig found on control-plane."
+          KCFG_B64=""
+          for i in $(seq 1 120); do
+            openstack console log show "${CP_SERVER_ID}" --lines 2000 > "$RUNNER_TEMP/control-plane-console.log" || true
+            KCFG_B64="$(awk '
+              /BEGIN K8S_ADMIN_KUBECONFIG_B64/ { capture=1; next }
+              /END K8S_ADMIN_KUBECONFIG_B64/ { capture=0 }
+              capture { gsub(/\r/, "", $0); printf "%s", $0 }
+            ' "$RUNNER_TEMP/control-plane-console.log")"
+            if [ -n "${KCFG_B64}" ]; then
+              echo "kubeconfig marker found in console log."
               break
             fi
-            echo "[$i/90] waiting for kubeadm admin.conf on ${CP_FIP}..."
-            sleep 20
+            echo "[$i/120] waiting for kubeconfig marker in control-plane console log..."
+            sleep 15
           done
 
-          scp -i "${KEY_FILE}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "${SSH_USER}@${CP_FIP}:/home/${SSH_USER}/.kube/config" "$RUNNER_TEMP/kubeconfig"
+          if [ -z "${KCFG_B64}" ]; then
+            echo "::error::Could not find kubeconfig marker in control-plane console output."
+            exit 1
+          fi
+
+          echo "${KCFG_B64}" | base64 -d > "$RUNNER_TEMP/kubeconfig"
 
           sed -E "s#server: https://.*:6443#server: https://${CP_FIP}:6443#" "$RUNNER_TEMP/kubeconfig" > "$RUNNER_TEMP/kubeconfig.public"
           mv "$RUNNER_TEMP/kubeconfig.public" "$RUNNER_TEMP/kubeconfig"
@@ -197,14 +207,3 @@ jobs:
           path: |
             ${{ runner.temp }}/kubeconfig.gpg
           if-no-files-found: error
-
-      - name: Delete ephemeral OpenStack keypair
-        if: ${{ always() }}
-        run: |
-          set -euo pipefail
-          if [ -n "${OS_KEYPAIR_NAME_CREATED:-}" ]; then
-            openstack keypair delete "${OS_KEYPAIR_NAME_CREATED}" || true
-          fi
-          if [ -n "${K8S_SSH_PRIVATE_KEY_PATH:-}" ] && [ -f "${K8S_SSH_PRIVATE_KEY_PATH}" ]; then
-            rm -f "${K8S_SSH_PRIVATE_KEY_PATH}" "${K8S_SSH_PRIVATE_KEY_PATH}.pub"
-          fi

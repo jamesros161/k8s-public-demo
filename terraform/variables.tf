@@ -110,13 +110,13 @@ variable "k8s_pod_cidr" {
 
 variable "k8s_ssh_allowed_cidr" {
   type        = string
-  description = "CIDR allowed to SSH to cluster nodes."
+  description = "CIDR(s) allowed to SSH to cluster nodes. Accepts one CIDR or comma-separated CIDRs."
   default     = "0.0.0.0/0"
 }
 
 variable "k8s_api_allowed_cidr" {
   type        = string
-  description = "CIDR allowed to access Kubernetes API on control-plane."
+  description = "CIDR(s) allowed to access Kubernetes API on control-plane. Accepts one CIDR or comma-separated CIDRs."
   default     = "0.0.0.0/0"
 }
 

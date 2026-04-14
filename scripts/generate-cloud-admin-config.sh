@@ -245,16 +245,14 @@ echo
 echo "== Kubernetes node inputs =="
 K8S_IMAGE_NAME="$(prompt_required "K8S_IMAGE_NAME (OpenStack image name)")"
 K8S_FLAVOR_NAME="$(prompt_required "K8S_FLAVOR_NAME (OpenStack flavor name)")"
-K8S_SSH_USER="$(prompt_default "K8S_SSH_USER" "ubuntu")"
-K8S_KEYPAIR_NAME_PREFIX="$(prompt_default "K8S_KEYPAIR_NAME_PREFIX" "k8s-demo-ephemeral")"
 
 TF_VAR_cluster_name="$(prompt_default "TF_VAR_cluster_name" "vpc-demo-cluster")"
 TF_VAR_k8s_worker_count="$(prompt_default "TF_VAR_k8s_worker_count" "2")"
 TF_VAR_k8s_worker_max_count="$(prompt_default "TF_VAR_k8s_worker_max_count" "10")"
 TF_VAR_k8s_repo_channel="$(prompt_default "TF_VAR_k8s_repo_channel" "v1.29")"
 TF_VAR_k8s_pod_cidr="$(prompt_default "TF_VAR_k8s_pod_cidr" "10.244.0.0/16")"
-TF_VAR_k8s_ssh_allowed_cidr="$(prompt_default "TF_VAR_k8s_ssh_allowed_cidr" "0.0.0.0/0")"
-TF_VAR_k8s_api_allowed_cidr="$(prompt_default "TF_VAR_k8s_api_allowed_cidr" "0.0.0.0/0")"
+TF_VAR_k8s_ssh_allowed_cidr="$(prompt_default "TF_VAR_k8s_ssh_allowed_cidr (single or comma-separated CIDRs)" "0.0.0.0/0")"
+TF_VAR_k8s_api_allowed_cidr="$(prompt_default "TF_VAR_k8s_api_allowed_cidr (single or comma-separated CIDRs)" "0.0.0.0/0")"
 
 echo
 echo "== Terraform state backend inputs =="
@@ -317,8 +315,6 @@ OS_APPLICATION_CREDENTIAL_SECRET=${OS_APPLICATION_CREDENTIAL_SECRET}
 
 K8S_IMAGE_NAME=${K8S_IMAGE_NAME}
 K8S_FLAVOR_NAME=${K8S_FLAVOR_NAME}
-K8S_SSH_USER=${K8S_SSH_USER}
-K8S_KEYPAIR_NAME_PREFIX=${K8S_KEYPAIR_NAME_PREFIX}
 KUBECONFIG_ARTIFACT_PASSPHRASE=${KUBECONFIG_ARTIFACT_PASSPHRASE}
 TF_VAR_cluster_name=${TF_VAR_cluster_name}
 TF_VAR_k8s_enabled=${TF_VAR_k8s_enabled}

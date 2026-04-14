@@ -45,7 +45,6 @@ bash scripts/generate-cloud-admin-config.sh
 The provision workflow also requires cluster build keys in the bundle:
 
 - `K8S_IMAGE_NAME`, `K8S_FLAVOR_NAME`
-- `K8S_KEYPAIR_NAME_PREFIX` (optional prefix for workflow-generated ephemeral keypair name)
 - `KUBECONFIG_ARTIFACT_PASSPHRASE` (encrypt kubeconfig artifact)
 - `TF_VAR_k8s_worker_count`, `TF_VAR_k8s_worker_max_count` (autoscaler min/max defaults; names are auto-derived from `TF_VAR_cluster_name`)
 
@@ -71,11 +70,9 @@ The provision workflow also requires cluster build keys in the bundle:
 `02 - Provision Cluster` now:
 
 1. Creates control-plane and worker VMs with cloud-init + kubeadm.
-2. Generates an ephemeral SSH keypair, imports the public key into OpenStack, and injects it into nodes.
-3. Retrieves kubeconfig over SSH from control-plane.
-4. Encrypts kubeconfig with `KUBECONFIG_ARTIFACT_PASSPHRASE`.
-5. Uploads artifact `kubeconfig-encrypted-<run_id>`.
-6. Deletes the ephemeral OpenStack keypair.
+2. Reads kubeconfig from control-plane cloud-init console output markers (no runner SSH required).
+3. Encrypts kubeconfig with `KUBECONFIG_ARTIFACT_PASSPHRASE`.
+4. Uploads artifact `kubeconfig-encrypted-<run_id>`.
 
 Decrypt example (optional local troubleshooting):
 

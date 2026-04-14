@@ -35,8 +35,6 @@ Provide these bundle keys:
 
 - `K8S_IMAGE_NAME` (Ubuntu image recommended)
 - `K8S_FLAVOR_NAME`
-- `K8S_SSH_USER` (default `ubuntu`)
-- Optional `K8S_KEYPAIR_NAME_PREFIX` (workflow generates and cleans up ephemeral keypair each run)
 - `KUBECONFIG_ARTIFACT_PASSPHRASE`
 
 ## 3) OpenStack credentials for Terraform networking

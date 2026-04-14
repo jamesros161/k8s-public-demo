@@ -22,6 +22,11 @@ output "control_plane_private_ip" {
   value       = local.control_plane_private_ip
 }
 
+output "control_plane_server_id" {
+  description = "OpenStack server UUID for Kubernetes control-plane node."
+  value       = try(openstack_compute_instance_v2.control_plane[0].id, null)
+}
+
 output "autoscaler_cluster_name" {
   description = "Derived cluster-autoscaler cluster name."
   value       = var.cluster_name
