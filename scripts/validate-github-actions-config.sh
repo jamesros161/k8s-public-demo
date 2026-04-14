@@ -83,6 +83,9 @@ if [ "$SCENARIO" = "provision" ]; then
   if [ -n "${CINDER_CSI_SET_DEFAULT_SC:-}" ] && [ "${CINDER_CSI_SET_DEFAULT_SC}" != "true" ] && [ "${CINDER_CSI_SET_DEFAULT_SC}" != "false" ]; then
     err "CINDER_CSI_SET_DEFAULT_SC must be true or false when set."
   fi
+  if [ -n "${OPENSTACK_CCM_USE_OCTAVIA:-}" ] && [ "${OPENSTACK_CCM_USE_OCTAVIA}" != "true" ] && [ "${OPENSTACK_CCM_USE_OCTAVIA}" != "false" ]; then
+    err "OPENSTACK_CCM_USE_OCTAVIA must be true or false when set."
+  fi
 
   if [ -n "${TF_STATE_S3_ENDPOINT:-}" ] && [[ ! "${TF_STATE_S3_ENDPOINT}" =~ ^https?:// ]]; then
     err "TF_STATE_S3_ENDPOINT should start with http:// or https://"

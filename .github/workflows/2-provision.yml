@@ -128,6 +128,9 @@ jobs:
           kubectl wait --for=condition=Ready nodes --all --timeout=45m
           kubectl get nodes -o wide
 
+      - name: Install OpenStack CCM (Octavia integration)
+        run: bash scripts/install-openstack-ccm.sh
+
       - name: Install Cinder CSI driver + StorageClass
         run: bash scripts/install-cinder-csi.sh
 
