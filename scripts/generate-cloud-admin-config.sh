@@ -270,6 +270,10 @@ TF_VAR_attach_to_existing_router_id="$(prompt_optional "TF_VAR_attach_to_existin
 TF_VAR_existing_network_id="$(prompt_optional "TF_VAR_existing_network_id")"
 TF_VAR_network_name_suffix="$(prompt_optional "TF_VAR_network_name_suffix")"
 
+CINDER_CSI_CHART_VERSION="$(prompt_optional "CINDER_CSI_CHART_VERSION")"
+CINDER_CSI_STORAGECLASS_NAME="$(prompt_default "CINDER_CSI_STORAGECLASS_NAME" "cinder-csi")"
+CINDER_CSI_SET_DEFAULT_SC="$(prompt_default "CINDER_CSI_SET_DEFAULT_SC (true/false)" "true")"
+
 echo
 if [ "${CAN_CREATE_APP_CRED}" = "true" ]; then
   echo "Creating application credential for user '${CUSTOMER_USER_ID}' in project '${CUSTOMER_PROJECT_ID}'..."
@@ -347,6 +351,9 @@ DEMO_DB_ROOT_PASSWORD=${DEMO_DB_ROOT_PASSWORD}
 
 METRICS_SERVER_CHART_VERSION=
 CLUSTER_AUTOSCALER_CHART_VERSION=
+CINDER_CSI_CHART_VERSION=${CINDER_CSI_CHART_VERSION}
+CINDER_CSI_STORAGECLASS_NAME=${CINDER_CSI_STORAGECLASS_NAME}
+CINDER_CSI_SET_DEFAULT_SC=${CINDER_CSI_SET_DEFAULT_SC}
 EOF
 
 chmod 600 "${OUTPUT_ENV}"

@@ -6,6 +6,7 @@ The repository demonstrates:
 
 - OpenStack tenant networking and Kubernetes VM provisioning with Terraform (cloud-init + kubeadm)
 - Kubernetes access + cloud config via one bundled secret (`CLOUD_ADMIN_CONFIG_B64`)
+- OpenStack Cinder CSI install for dynamic persistent volume provisioning
 - App deployment with Helm (WordPress/Drupal)
 - Kubernetes-native autoscaling path: HPA + metrics-server + cluster-autoscaler (installed during provisioning)
 
@@ -47,13 +48,14 @@ The provision workflow also requires cluster build keys in the bundle:
 - `K8S_IMAGE_NAME`, `K8S_FLAVOR_NAME`
 - `KUBECONFIG_ARTIFACT_PASSPHRASE` (encrypt kubeconfig artifact)
 - `TF_VAR_k8s_worker_count`, `TF_VAR_k8s_worker_max_count` (autoscaler min/max defaults; names are auto-derived from `TF_VAR_cluster_name`)
+- Optional Cinder CSI tuning: `CINDER_CSI_CHART_VERSION`, `CINDER_CSI_STORAGECLASS_NAME`, `CINDER_CSI_SET_DEFAULT_SC`
 
 ## Workflows
 
 | Workflow | Purpose |
 |----------|---------|
 | `01 - Validate configuration` | Validate required values by scenario |
-| `02 - Provision Cluster` | Terraform apply (networking + kubeadm cluster), fetch/encrypt kubeconfig artifact, install autoscaling stack + Traefik |
+| `02 - Provision Cluster` | Terraform apply (networking + kubeadm cluster), fetch/encrypt kubeconfig artifact, install Cinder CSI + autoscaling stack + Traefik |
 | `03 - Deploy Single Site` | Deploy WordPress or Drupal site |
 | `04 - Destroy Single Site` | Delete one site namespace |
 | `05 - Tune cluster autoscaler` | Patch scale-down timers in `kube-system` |

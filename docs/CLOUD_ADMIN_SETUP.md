@@ -30,6 +30,7 @@ If those permissions are unavailable, run this demo in **fixed node pool** mode 
 ## 2) Kubernetes cluster provisioning inputs
 
 This branch provisions the Kubernetes cluster during workflow `02 - Provision Cluster` (Terraform + cloud-init + kubeadm).
+The same workflow also installs OpenStack Cinder CSI to enable dynamic PVC provisioning.
 
 Provide these bundle keys:
 
@@ -76,7 +77,8 @@ Required for site and burst workflows:
 
 - `TF_VAR_k8s_worker_count`, `TF_VAR_k8s_worker_max_count`
 - Cluster/group names are derived automatically from `TF_VAR_cluster_name`
-- Optional chart pinning: `METRICS_SERVER_CHART_VERSION`, `CLUSTER_AUTOSCALER_CHART_VERSION`
+- Optional chart pinning: `METRICS_SERVER_CHART_VERSION`, `CLUSTER_AUTOSCALER_CHART_VERSION`, `CINDER_CSI_CHART_VERSION`
+- Optional Cinder CSI storage class controls: `CINDER_CSI_STORAGECLASS_NAME`, `CINDER_CSI_SET_DEFAULT_SC`
 Workflow `12 - Repair Autoscaling Stack` is now mainly for repair/reinstall.
 
 ## 8) Optional Terraform networking overrides
