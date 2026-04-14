@@ -1,0 +1,44 @@
+name: 12 - Repair Autoscaling Stack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUD_ADMIN_CONFIG_B64: ${{ secrets.CLOUD_ADMIN_CONFIG_B64 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load cloud-admin config bundle
+        run: bash scripts/load-cloud-admin-config.sh
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+
+      - name: Load kubeconfig from encrypted artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/load-kubeconfig-from-artifact.sh
+
+      - name: Re-install metrics-server and cluster-autoscaler
+        run: bash scripts/install-autoscaling-stack.sh
+
+      - name: Show autoscaling resources
+        run: |
+          kubectl get deploy metrics-server -n kube-system -o wide || true
+          kubectl get deploy cluster-autoscaler -n kube-system -o wide || true
+          kubectl get hpa -A || true

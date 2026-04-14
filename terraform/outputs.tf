@@ -1,20 +1,10 @@
-output "cluster_id" {
-  value       = openstack_containerinfra_cluster_v1.cluster.id
-  description = "Magnum cluster UUID."
-}
-
-output "cluster_name" {
-  value       = openstack_containerinfra_cluster_v1.cluster.name
-  description = "Magnum cluster name (for openstack coe cluster config)."
-}
-
 output "demo_network_id" {
   value       = local.tenant_network_id
   description = "Tenant VPC network ID (created or pre-existing)."
 }
 
 output "demo_subnet_id" {
-  value       = openstack_networking_subnet_v2.demo_subnet.id
+  value = openstack_networking_subnet_v2.demo_subnet.id
 }
 
 output "new_router_id" {
@@ -22,7 +12,32 @@ output "new_router_id" {
   value       = try(openstack_networking_router_v2.demo_router[0].id, null)
 }
 
-output "kubeconfig_hint" {
-  value       = "openstack coe cluster config ${openstack_containerinfra_cluster_v1.cluster.name} --dir ~/.kube"
-  description = "Command to fetch kubeconfig after the cluster reaches CREATE_COMPLETE."
+output "control_plane_floating_ip" {
+  description = "Floating IP of Kubernetes control-plane node."
+  value       = try(openstack_networking_floatingip_v2.control_plane_fip[0].address, null)
+}
+
+output "control_plane_private_ip" {
+  description = "Private IP of Kubernetes control-plane node."
+  value       = local.control_plane_private_ip
+}
+
+output "autoscaler_cluster_name" {
+  description = "Derived cluster-autoscaler cluster name."
+  value       = var.cluster_name
+}
+
+output "autoscaler_group_name" {
+  description = "Derived cluster-autoscaler worker group name."
+  value       = "${var.cluster_name}-worker"
+}
+
+output "autoscaler_nodes_min_size" {
+  description = "Derived cluster-autoscaler minimum node count."
+  value       = var.k8s_worker_count
+}
+
+output "autoscaler_nodes_max_size" {
+  description = "Derived cluster-autoscaler maximum node count."
+  value       = var.k8s_worker_max_count
 }

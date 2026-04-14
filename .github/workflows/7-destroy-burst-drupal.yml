@@ -17,54 +17,43 @@ on:
         required: false
         default: false
         type: boolean
+      scale_down_wait_minutes:
+        description: Max minutes to watch node scale-down after deleting burst namespaces
+        required: false
+        default: "30"
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   destroy-burst:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
-      OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
-      OS_INTERFACE: ${{ vars.OS_INTERFACE }}
-      OS_IDENTITY_API_VERSION: ${{ vars.OS_IDENTITY_API_VERSION }}
-      OS_AUTH_TYPE: ${{ vars.OS_AUTH_TYPE }}
-      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
-      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
-      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+      CLOUD_ADMIN_CONFIG_B64: ${{ secrets.CLOUD_ADMIN_CONFIG_B64 }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install OpenStack CLI (Magnum)
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "python-openstackclient" "python-magnumclient"
-          echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
-
-      - name: Resolve cluster name
-        id: cluster
-        run: |
-          C="${CLUSTER_NAME}"
-          if [ -z "$C" ]; then C="vpc-demo-cluster"; fi
-          echo "name=$C" >> "$GITHUB_OUTPUT"
-
-      - name: Fetch kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          openstack coe cluster config "${{ steps.cluster.outputs.name }}" --dir "$HOME/.kube"
-          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+      - name: Load cloud-admin config bundle
+        run: bash scripts/load-cloud-admin-config.sh
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
+
+      - name: Load kubeconfig from encrypted artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/load-kubeconfig-from-artifact.sh
+
+      - name: Capture pre-delete node count
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "SCALE_DOWN_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+          echo "PRE_DELETE_NODE_COUNT=$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')" >> "$GITHUB_ENV"
 
       - name: Destroy burst namespaces
         env:
@@ -84,5 +73,54 @@ jobs:
         if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
-          echo "::notice::Extra workers usually disappear only after scale-down delays (often ~10m each unless you ran tune-cluster-autoscaler-demo). They will not drop below Terraform autoscaler_min_nodes (default 2). Nodes still hosting Traefik, other apps, or certain kube-system pods may not be chosen for removal — see diagnostics below."
+          echo "::notice::Extra workers usually disappear only after scale-down delays (often ~10m each unless you ran tune-cluster-autoscaler-demo). They will not drop below your node group minimum size. Nodes still hosting Traefik, other apps, or certain kube-system pods may not be chosen for removal — see diagnostics below."
           bash scripts/diagnose-cluster-autoscaler-scale-down.sh
+
+      - name: Watch node scale-down KPIs
+        if: ${{ !inputs.dry_run }}
+        env:
+          SCALE_DOWN_WAIT_MINUTES: ${{ inputs.scale_down_wait_minutes }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${SCALE_DOWN_WAIT_MINUTES}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::scale_down_wait_minutes must be a positive integer."
+            exit 1
+          fi
+
+          PRE="${PRE_DELETE_NODE_COUNT:-0}"
+          START="${SCALE_DOWN_START_EPOCH:-$(date +%s)}"
+          DEADLINE=$((START + SCALE_DOWN_WAIT_MINUTES * 60))
+          LOWEST="$PRE"
+
+          while true; do
+            NOW=$(date +%s)
+            CUR=$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ')
+            if (( CUR < LOWEST )); then
+              LOWEST="$CUR"
+            fi
+            echo "scale-down watch: current_nodes=${CUR} lowest_nodes=${LOWEST} pre_delete_nodes=${PRE}"
+            if (( NOW >= DEADLINE )); then
+              break
+            fi
+            sleep 60
+          done
+
+          END=$(date +%s)
+          DURATION=$((END - START))
+          NODE_DROP=$((PRE - LOWEST))
+          {
+            echo "time_to_scale_down_observe_seconds=${DURATION}"
+            echo "pre_delete_node_count=${PRE}"
+            echo "lowest_node_count_observed=${LOWEST}"
+            echo "node_drop_observed=${NODE_DROP}"
+          } > scale-down-kpis.txt
+
+          echo "::notice::KPI time_to_scale_down_observe_seconds=${DURATION} pre_delete_nodes=${PRE} lowest_nodes=${LOWEST} node_drop_observed=${NODE_DROP}"
+
+      - name: Upload scale-down KPI snapshot
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: scale-down-kpi-snapshot-${{ github.run_id }}
+          path: scale-down-kpis.txt
+          if-no-files-found: warn

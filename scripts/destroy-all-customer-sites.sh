@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Remove all customer site namespaces from Site - Deploy: names ending in -wordpress or -drupal.
-# Excludes Magnum burst demo namespaces (scale-<run_id>-<nnn>-drupal) and core cluster namespaces.
+# Excludes burst demo namespaces (scale-<run_id>-<nnn>-drupal) and core cluster namespaces.
 #
 # Optional env: DRY_RUN=1 — list matches only, do not delete
 set -euo pipefail

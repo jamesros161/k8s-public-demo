@@ -5,7 +5,7 @@ on:
     inputs:
       destroy_confirmation:
         description: |
-          Irreversible: removes Terraform-managed OpenStack resources (Magnum cluster, VPC, etc.).
+          Irreversible: removes Terraform-managed OpenStack resources (networking, etc.).
           Default cancels. To proceed, change this to destroy-infra-confirm.
         required: true
         type: choice
@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: openstack-terraform-provision
@@ -26,25 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
-      OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
-      OS_INTERFACE: ${{ vars.OS_INTERFACE }}
-      OS_IDENTITY_API_VERSION: ${{ vars.OS_IDENTITY_API_VERSION }}
-      OS_AUTH_TYPE: ${{ vars.OS_AUTH_TYPE }}
-      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
-      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
-      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
-      TF_VAR_attach_to_existing_router_id: ${{ vars.EXISTING_ROUTER_ID }}
-      TF_VAR_existing_network_id: ${{ vars.EXISTING_NETWORK_ID }}
-      TF_VAR_network_name_suffix: ${{ vars.NETWORK_NAME_SUFFIX }}
-      TF_VAR_cluster_template_name: ${{ vars.CLUSTER_TEMPLATE_NAME != '' && vars.CLUSTER_TEMPLATE_NAME || 'kubernetes-v1.26.8-rancher1' }}
-      TF_VAR_cluster_autoscaling_enabled: ${{ vars.CLUSTER_AUTOSCALING_ENABLED || 'true' }}
-      TF_VAR_cluster_name: ${{ vars.CLUSTER_NAME != '' && vars.CLUSTER_NAME || 'vpc-demo-cluster' }}
-      TF_STATE_S3_BUCKET: ${{ vars.TF_STATE_S3_BUCKET }}
-      TF_STATE_S3_KEY: ${{ vars.TF_STATE_S3_KEY }}
-      TF_STATE_S3_ENDPOINT: ${{ vars.TF_STATE_S3_ENDPOINT }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.TF_STATE_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.TF_STATE_S3_SECRET_ACCESS_KEY }}
+      CLOUD_ADMIN_CONFIG_B64: ${{ secrets.CLOUD_ADMIN_CONFIG_B64 }}
 
     steps:
       - name: Require explicit destroy confirmation
@@ -58,29 +41,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select OpenStack auth (app cred or password for Magnum trust)
+      - name: Load cloud-admin config bundle
+        run: bash scripts/load-cloud-admin-config.sh
+
+      - name: Select OpenStack auth (app credential)
         run: bash scripts/configure-gha-openstack-auth.sh
-        env:
-          TERRAFORM_OPENSTACK_USERNAME: ${{ secrets.TERRAFORM_OPENSTACK_USERNAME }}
-          TERRAFORM_OPENSTACK_PASSWORD: ${{ secrets.TERRAFORM_OPENSTACK_PASSWORD }}
-          TERRAFORM_OPENSTACK_PROJECT_ID: ${{ vars.TERRAFORM_OPENSTACK_PROJECT_ID }}
-          TERRAFORM_OPENSTACK_USER_DOMAIN_NAME: ${{ vars.TERRAFORM_OPENSTACK_USER_DOMAIN_NAME }}
-          TERRAFORM_OPENSTACK_PROJECT_DOMAIN_ID: ${{ vars.TERRAFORM_OPENSTACK_PROJECT_DOMAIN_ID }}
 
       - name: Terraform state note
         run: |
           echo "::notice::Without remote state or a downloaded terraform.tfstate from the provision artifact, destroy may not remove cloud resources."
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install OpenStack CLI (Magnum)
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "python-openstackclient" "python-magnumclient"
-          echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
 
       - name: Setup kubectl and Helm (optional cleanup)
         uses: azure/setup-kubectl@v4
@@ -89,15 +58,15 @@ jobs:
         with:
           version: v3.14.4
 
+      - name: Load kubeconfig from encrypted artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/load-kubeconfig-from-artifact.sh
+
       - name: Try remove Traefik (ignore errors)
         continue-on-error: true
         run: |
-          C="${CLUSTER_NAME:-vpc-demo-cluster}"
-          mkdir -p "$HOME/.kube"
-          if openstack coe cluster config "$C" --dir "$HOME/.kube" 2>/dev/null; then
-            export KUBECONFIG="$HOME/.kube/config"
-            helm uninstall traefik -n traefik || true
-          fi
+          helm uninstall traefik -n traefik || true
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -112,3 +81,26 @@ jobs:
         run: |
           terraform init -backend-config=backend.auto.hcl
           terraform destroy -auto-approve
+
+      - name: Delete encrypted kubeconfig artifacts
+        if: ${{ success() && inputs.destroy_confirmation == 'destroy-infra-confirm' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          IDS="$(gh api "repos/${REPO}/actions/artifacts" --paginate --jq '.artifacts[] | select(.name | startswith("kubeconfig-encrypted-")) | .id')"
+
+          if [ -z "${IDS}" ]; then
+            echo "::notice::No kubeconfig-encrypted artifacts found to delete."
+            exit 0
+          fi
+
+          COUNT=0
+          while IFS= read -r ID; do
+            [ -z "${ID}" ] && continue
+            gh api -X DELETE "repos/${REPO}/actions/artifacts/${ID}"
+            COUNT=$((COUNT + 1))
+          done <<< "${IDS}"
+
+          echo "::notice::Deleted ${COUNT} kubeconfig-encrypted artifact(s)."

@@ -7,7 +7,7 @@ Upstream defaults are often ~10m for --scale-down-unneeded-time and
 flags and appends the ones from the environment.
 
 Defaults (~2m) speed up demo scale-down without going as extreme as sub-minute
-values, which can stress Magnum/Heat (see kubernetes/autoscaler issue #6213).
+values, which can create extra churn (see kubernetes/autoscaler issue #6213).
 
 Env:
   SCALE_DOWN_UNNEEDED_TIME   (default 2m)  — node must be unneeded this long before removal
@@ -52,8 +52,6 @@ def container_score(name: str, c: dict) -> int:
     if "cluster-autoscaler" in img and "controller" not in img:
         score += 5
     args = c.get("args") or []
-    if any((a or "").startswith("--cloud-provider=magnum") for a in args):
-        score += 3
     if any((a or "").startswith("--cloud-provider=") for a in args):
         score += 1
     return score

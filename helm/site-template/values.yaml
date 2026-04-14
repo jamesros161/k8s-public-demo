@@ -7,6 +7,12 @@ resources:
     memory: 512Mi
     cpu: 500m
 
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
 db:
   user: admin
   password: change-me-db
@@ -23,7 +29,7 @@ wordpress:
   image: wordpress:latest
   # Title / admin for CI come from Deploy site workflow inputs; password is random + Secret wordpress-admin (not Helm).
 
-# Empty string = cluster default StorageClass (expect Cinder CSI on Magnum).
+# Empty string = cluster default StorageClass.
 storageClass: ""
 
 mariadb:

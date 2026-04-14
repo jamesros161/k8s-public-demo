@@ -41,7 +41,7 @@ else
     echo "  'Failed to list *v1beta1.PodDisruptionBudget: the server could not find the requested resource'"
     echo "the cluster-autoscaler image is too old for this API server. Upgrade CA to the same MINOR as"
     echo "the server (e.g. registry.k8s.io/autoscaling/cluster-autoscaler:v1.26.x for Kubernetes 1.26),"
-    echo "via a newer Magnum cluster template or by patching the Deployment image (ops/demo only)."
+    echo "via your cluster lifecycle tooling or by patching the Deployment image (ops/demo only)."
     echo ""
   fi
   echo "--- args (scale-down timers) ---"
@@ -52,7 +52,7 @@ fi
 echo ""
 echo "=== Hints ==="
 echo "1. Scale-down is delayed by --scale-down-unneeded-time and --scale-down-delay-after-add (often ~10m each unless you run workflow tune-cluster-autoscaler-demo)."
-echo "2. Magnum min_node_count (Terraform autoscaler_min_nodes, often 2) is a floor — extra workers should shrink toward that, not below."
+echo "2. Node groups usually have a minimum size floor configured in your autoscaler/provider setup; workers should shrink toward that floor, not below."
 echo "3. CA often will not remove a node that still runs non-DaemonSet pods it cannot move (kube-system, Traefik, monitoring, etc.)."
 echo "4. For CA messages: kubectl logs -n ${CA_NAMESPACE} deploy/${CA_DEPLOY:-cluster-autoscaler} --tail=100"
 echo "5. PDB v1beta1 list errors + no scale-up: see NOTE under 'API server vs cluster-autoscaler image' above."

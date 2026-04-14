@@ -48,3 +48,5 @@ id_rsa.pub
 .vscode/
 *.swp
 *~
+cloud-admin-config.generated.*
+

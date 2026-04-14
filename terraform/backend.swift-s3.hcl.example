@@ -19,8 +19,9 @@
 #   4. From terraform/:  terraform init -backend-config=backend.hcl
 #      (First time from local state: add -migrate-state if you are moving state.)
 #
-# GitHub Actions: set Variables TF_STATE_S3_BUCKET, TF_STATE_S3_ENDPOINT, optional TF_STATE_S3_KEY;
-# Secrets TF_STATE_S3_ACCESS_KEY_ID, TF_STATE_S3_SECRET_ACCESS_KEY. Workflow runs
+# GitHub Actions: add these keys to CLOUD_ADMIN_CONFIG_B64:
+# TF_STATE_S3_BUCKET, TF_STATE_S3_ENDPOINT, optional TF_STATE_S3_KEY,
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY. Workflow runs
 # scripts/write-terraform-s3-backend-ci.sh then terraform init -backend-config=backend.auto.hcl
 
 bucket = "terraform-state" # S3 bucket name = Swift container name in many setups

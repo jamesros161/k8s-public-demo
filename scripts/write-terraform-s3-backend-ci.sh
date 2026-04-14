@@ -7,11 +7,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [ -z "${TF_STATE_S3_BUCKET:-}" ] || [ -z "${TF_STATE_S3_ENDPOINT:-}" ]; then
-  echo "::error::Set repository Variables TF_STATE_S3_BUCKET and TF_STATE_S3_ENDPOINT (Swift S3 API). See README § Terraform state."
+  echo "::error::Set TF_STATE_S3_BUCKET and TF_STATE_S3_ENDPOINT in CLOUD_ADMIN_CONFIG_B64 (Swift S3 API). See README § Single secret setup."
   exit 1
 fi
 if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-  echo "::error::Set repository Secrets TF_STATE_S3_ACCESS_KEY_ID and TF_STATE_S3_SECRET_ACCESS_KEY (S3 API keys for state bucket—not the OS_* application credential)."
+  echo "::error::Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in CLOUD_ADMIN_CONFIG_B64 (S3 API keys for state bucket—not the OS_* application credential)."
   exit 1
 fi
 

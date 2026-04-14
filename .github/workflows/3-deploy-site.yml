@@ -29,52 +29,29 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      OS_AUTH_URL: ${{ vars.OS_AUTH_URL }}
-      OS_REGION_NAME: ${{ vars.OS_REGION_NAME }}
-      OS_INTERFACE: ${{ vars.OS_INTERFACE }}
-      OS_IDENTITY_API_VERSION: ${{ vars.OS_IDENTITY_API_VERSION }}
-      OS_AUTH_TYPE: ${{ vars.OS_AUTH_TYPE }}
-      OS_APPLICATION_CREDENTIAL_ID: ${{ secrets.OS_APPLICATION_CREDENTIAL_ID }}
-      OS_APPLICATION_CREDENTIAL_SECRET: ${{ secrets.OS_APPLICATION_CREDENTIAL_SECRET }}
-      CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+      CLOUD_ADMIN_CONFIG_B64: ${{ secrets.CLOUD_ADMIN_CONFIG_B64 }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install OpenStack CLI (Magnum)
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "python-openstackclient" "python-magnumclient"
-          echo "$(python -c 'import site; print(site.getuserbase())')/bin" >> "$GITHUB_PATH"
-
-      - name: Resolve cluster name
-        id: cluster
-        run: |
-          C="${CLUSTER_NAME}"
-          if [ -z "$C" ]; then C="vpc-demo-cluster"; fi
-          echo "name=$C" >> "$GITHUB_OUTPUT"
-
-      - name: Fetch kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          openstack coe cluster config "${{ steps.cluster.outputs.name }}" --dir "$HOME/.kube"
-          chmod 600 "$HOME/.kube/config"
-          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+      - name: Load cloud-admin config bundle
+        run: bash scripts/load-cloud-admin-config.sh
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
+
+      - name: Load kubeconfig from encrypted artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/load-kubeconfig-from-artifact.sh
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
@@ -97,22 +74,19 @@ jobs:
         env:
           SITE_ID: ${{ steps.site.outputs.slug }}
           APP_TYPE: ${{ inputs.app_type }}
-          DOMAIN_BASE: ${{ vars.DEMO_DOMAIN_BASE }}
-          DB_PASS: ${{ secrets.DEMO_DB_PASSWORD }}
-          DB_ROOT: ${{ secrets.DEMO_DB_ROOT_PASSWORD }}
           ADMIN_USER: ${{ inputs.admin_username != '' && inputs.admin_username || 'admin' }}
           ADMIN_PASSWORD: ${{ inputs.admin_password }}
         run: |
           set -euo pipefail
           echo "::add-mask::${ADMIN_PASSWORD}"
-          if [ -z "${DB_PASS}" ] || [ -z "${DB_ROOT}" ]; then
-            echo "::error::DEMO_DB_PASSWORD and DEMO_DB_ROOT_PASSWORD must be set to non-empty values in repository Secrets."
+          if [ -z "${DEMO_DB_PASSWORD:-}" ] || [ -z "${DEMO_DB_ROOT_PASSWORD:-}" ]; then
+            echo "::error::DEMO_DB_PASSWORD and DEMO_DB_ROOT_PASSWORD must be set to non-empty values in CLOUD_ADMIN_CONFIG_B64."
             echo "If either secret is missing, Helm gets --set db.password= / db.rootPassword= and overrides chart defaults; MariaDB then exits with 'password option is not specified'."
             exit 1
           fi
           NS="${SITE_ID}-${APP_TYPE}"
           REL="$SITE_ID"
-          DOMAIN="${DOMAIN_BASE:-k8sdemo.example.com}"
+          DOMAIN="${DEMO_DOMAIN_BASE:-k8sdemo.example.com}"
           DRUPAL_HELM=()
           if [ "${APP_TYPE}" = "drupal" ]; then
             DRUPAL_HELM=(
@@ -126,8 +100,8 @@ jobs:
             --set "siteId=$SITE_ID" \
             --set "appType=$APP_TYPE" \
             --set "domainBase=$DOMAIN" \
-            --set-string "db.password=${DB_PASS}" \
-            --set-string "db.rootPassword=${DB_ROOT}" \
+            --set-string "db.password=${DEMO_DB_PASSWORD}" \
+            --set-string "db.rootPassword=${DEMO_DB_ROOT_PASSWORD}" \
             "${DRUPAL_HELM[@]}"
 
       - name: WordPress — wait for DB and run WP-CLI install
@@ -136,15 +110,14 @@ jobs:
           DEPLOY_NAMESPACE: ${{ steps.site.outputs.slug }}-wordpress
           SITE_ID: ${{ steps.site.outputs.slug }}
           APP_TYPE: wordpress
-          DOMAIN_BASE: ${{ vars.DEMO_DOMAIN_BASE }}
           WP_ADMIN_USER: ${{ inputs.admin_username != '' && inputs.admin_username || 'admin' }}
           WP_ADMIN_PASSWORD: ${{ inputs.admin_password }}
-          MARIADB_ROOT_PASSWORD: ${{ secrets.DEMO_DB_ROOT_PASSWORD }}
-          DB_APP_PASSWORD: ${{ secrets.DEMO_DB_PASSWORD }}
         run: |
           set -euo pipefail
           echo "::add-mask::${WP_ADMIN_PASSWORD}"
-          export DOMAIN_BASE="${DOMAIN_BASE:-k8sdemo.example.com}"
+          export DOMAIN_BASE="${DEMO_DOMAIN_BASE:-k8sdemo.example.com}"
+          export MARIADB_ROOT_PASSWORD="${DEMO_DB_ROOT_PASSWORD:-}"
+          export DB_APP_PASSWORD="${DEMO_DB_PASSWORD:-}"
           bash scripts/wordpress-wpcli-bootstrap.sh
           kubectl create secret generic wordpress-admin \
             --namespace="${DEPLOY_NAMESPACE}" \
@@ -160,15 +133,14 @@ jobs:
           DEPLOY_NAMESPACE: ${{ steps.site.outputs.slug }}-drupal
           SITE_ID: ${{ steps.site.outputs.slug }}
           APP_TYPE: drupal
-          DOMAIN_BASE: ${{ vars.DEMO_DOMAIN_BASE }}
           DRUPAL_ADMIN_USER: ${{ inputs.admin_username != '' && inputs.admin_username || 'admin' }}
           DRUPAL_ADMIN_PASSWORD: ${{ inputs.admin_password }}
-          MARIADB_ROOT_PASSWORD: ${{ secrets.DEMO_DB_ROOT_PASSWORD }}
-          DB_APP_PASSWORD: ${{ secrets.DEMO_DB_PASSWORD }}
         run: |
           set -euo pipefail
           echo "::add-mask::${DRUPAL_ADMIN_PASSWORD}"
-          export DOMAIN_BASE="${DOMAIN_BASE:-k8sdemo.example.com}"
+          export DOMAIN_BASE="${DEMO_DOMAIN_BASE:-k8sdemo.example.com}"
+          export MARIADB_ROOT_PASSWORD="${DEMO_DB_ROOT_PASSWORD:-}"
+          export DB_APP_PASSWORD="${DEMO_DB_PASSWORD:-}"
           bash scripts/drupal-drush-bootstrap.sh
           kubectl create secret generic drupal-admin \
             --namespace="${DEPLOY_NAMESPACE}" \
