@@ -82,21 +82,20 @@ jobs:
           KCFG_B64=""
           for i in $(seq 1 120); do
             openstack console log show "${CP_SERVER_ID}" --lines 2000 > "$RUNNER_TEMP/control-plane-console.log" || true
-            KCFG_B64="$(awk '
-              /BEGIN K8S_ADMIN_KUBECONFIG_B64/ { capture=1; next }
-              /END K8S_ADMIN_KUBECONFIG_B64/ { capture=0 }
-              capture { gsub(/\r/, "", $0); printf "%s", $0 }
-            ' "$RUNNER_TEMP/control-plane-console.log")"
+            KCFG_B64="$(
+              sed -n 's/.*K8S_ADMIN_KUBECONFIG_B64=\([A-Za-z0-9+/=]\+\).*/\1/p' "$RUNNER_TEMP/control-plane-console.log" \
+                | tail -n1
+            )"
             if [ -n "${KCFG_B64}" ]; then
-              echo "kubeconfig marker found in console log."
+              echo "kubeconfig payload found in console log."
               break
             fi
-            echo "[$i/120] waiting for kubeconfig marker in control-plane console log..."
+            echo "[$i/120] waiting for kubeconfig payload in control-plane console log..."
             sleep 15
           done
 
           if [ -z "${KCFG_B64}" ]; then
-            echo "::error::Could not find kubeconfig marker in control-plane console output."
+            echo "::error::Could not find kubeconfig payload in control-plane console output."
             exit 1
           fi
 
