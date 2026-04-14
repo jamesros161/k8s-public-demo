@@ -27,8 +27,8 @@ helm repo update
 METRICS_ARGS=(
   upgrade --install metrics-server metrics-server/metrics-server
   --namespace kube-system
-  --set args[0]=--kubelet-insecure-tls
-  --set args[1]=--kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+  --set-string args[0]=--kubelet-insecure-tls
+  --set-string args[1]=--kubelet-preferred-address-types=InternalIP\,ExternalIP\,Hostname
   --wait
   --timeout 10m
 )

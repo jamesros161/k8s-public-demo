@@ -35,6 +35,13 @@ while IFS= read -r line || [ -n "${line}" ]; do
     continue
   fi
 
+  # Mask each loaded value so accidental echoes are redacted in workflow logs.
+  mask_value="${value//$'\r'/}"
+  mask_value="${mask_value//$'\n'/}"
+  if [ -n "${mask_value}" ]; then
+    echo "::add-mask::${mask_value}"
+  fi
+
   delimiter="EOF_${key}_$$"
   {
     echo "${key}<<${delimiter}"
