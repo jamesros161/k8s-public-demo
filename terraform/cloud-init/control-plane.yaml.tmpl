@@ -6,15 +6,8 @@ runcmd:
   - sed -ri '/\sswap\s/s/^#?/#/' /etc/fstab
   - modprobe overlay
   - modprobe br_netfilter
-  - sh -c 'cat > /etc/modules-load.d/k8s.conf <<EOF
-overlay
-br_netfilter
-EOF'
-  - sh -c 'cat > /etc/sysctl.d/99-kubernetes-cri.conf <<EOF
-net.bridge.bridge-nf-call-iptables = 1
-net.bridge.bridge-nf-call-ip6tables = 1
-net.ipv4.ip_forward = 1
-EOF'
+  - sh -c 'printf "overlay\nbr_netfilter\n" > /etc/modules-load.d/k8s.conf'
+  - sh -c 'printf "net.bridge.bridge-nf-call-iptables = 1\nnet.bridge.bridge-nf-call-ip6tables = 1\nnet.ipv4.ip_forward = 1\n" > /etc/sysctl.d/99-kubernetes-cri.conf'
   - sysctl --system
   - apt-get update
   - apt-get install -y ca-certificates curl gnupg lsb-release apt-transport-https
