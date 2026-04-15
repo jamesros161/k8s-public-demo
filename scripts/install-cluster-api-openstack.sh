@@ -60,33 +60,65 @@ fi
 
 clusterctl version
 
-INIT_ARGS=(
-  init
-  --core cluster-api
-  --bootstrap kubeadm
-  --control-plane kubeadm
-  --ipam in-cluster
-  --infrastructure openstack
-  --wait-providers
-)
-
-if [ -n "${CAPI_CORE_PROVIDER_VERSION}" ]; then
-  INIT_ARGS+=(--core "cluster-api:${CAPI_CORE_PROVIDER_VERSION}")
-fi
-if [ -n "${CAPI_BOOTSTRAP_PROVIDER_VERSION}" ]; then
-  INIT_ARGS+=(--bootstrap "kubeadm:${CAPI_BOOTSTRAP_PROVIDER_VERSION}")
-fi
-if [ -n "${CAPI_CONTROL_PLANE_PROVIDER_VERSION}" ]; then
-  INIT_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
-fi
-if [ -n "${CAPI_IPAM_PROVIDER_VERSION}" ]; then
-  INIT_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
-fi
-if [ -n "${CAPO_PROVIDER_VERSION}" ]; then
-  INIT_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
+if kubectl get providers.clusterctl.cluster.x-k8s.io -A >/dev/null 2>&1; then
+  EXISTING_PROVIDER_COUNT="$(kubectl get providers.clusterctl.cluster.x-k8s.io -A --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+else
+  EXISTING_PROVIDER_COUNT="0"
 fi
 
-clusterctl "${INIT_ARGS[@]}"
+if [ "${EXISTING_PROVIDER_COUNT}" -eq 0 ]; then
+  INIT_ARGS=(
+    init
+    --core cluster-api
+    --bootstrap kubeadm
+    --control-plane kubeadm
+    --ipam in-cluster
+    --infrastructure openstack
+    --wait-providers
+  )
+
+  if [ -n "${CAPI_CORE_PROVIDER_VERSION}" ]; then
+    INIT_ARGS+=(--core "cluster-api:${CAPI_CORE_PROVIDER_VERSION}")
+  fi
+  if [ -n "${CAPI_BOOTSTRAP_PROVIDER_VERSION}" ]; then
+    INIT_ARGS+=(--bootstrap "kubeadm:${CAPI_BOOTSTRAP_PROVIDER_VERSION}")
+  fi
+  if [ -n "${CAPI_CONTROL_PLANE_PROVIDER_VERSION}" ]; then
+    INIT_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
+  fi
+  if [ -n "${CAPI_IPAM_PROVIDER_VERSION}" ]; then
+    INIT_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
+  fi
+  if [ -n "${CAPO_PROVIDER_VERSION}" ]; then
+    INIT_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
+  fi
+
+  clusterctl "${INIT_ARGS[@]}"
+else
+  UPGRADE_ARGS=(
+    upgrade apply
+    --wait-providers
+  )
+
+  if [ -n "${CAPI_CORE_PROVIDER_VERSION}" ]; then
+    UPGRADE_ARGS+=(--core "cluster-api:${CAPI_CORE_PROVIDER_VERSION}")
+  fi
+  if [ -n "${CAPI_BOOTSTRAP_PROVIDER_VERSION}" ]; then
+    UPGRADE_ARGS+=(--bootstrap "kubeadm:${CAPI_BOOTSTRAP_PROVIDER_VERSION}")
+  fi
+  if [ -n "${CAPI_CONTROL_PLANE_PROVIDER_VERSION}" ]; then
+    UPGRADE_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
+  fi
+  if [ -n "${CAPI_IPAM_PROVIDER_VERSION}" ]; then
+    UPGRADE_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
+  fi
+  if [ -n "${CAPO_PROVIDER_VERSION}" ]; then
+    UPGRADE_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
+  fi
+
+  echo "::notice::Detected existing CAPI providers (${EXISTING_PROVIDER_COUNT}); running clusterctl upgrade apply instead of init."
+  clusterctl "${UPGRADE_ARGS[@]}"
+fi
 
 kubectl create namespace "${CAPI_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 
