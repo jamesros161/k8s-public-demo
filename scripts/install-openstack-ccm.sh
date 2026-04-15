@@ -71,4 +71,11 @@ fi
 helm "${ARGS[@]}"
 
 echo "::notice::openstack-cloud-controller-manager installed or updated."
-kubectl -n kube-system get deploy openstack-cloud-controller-manager -o wide
+if kubectl -n kube-system get ds openstack-cloud-controller-manager >/dev/null 2>&1; then
+  kubectl -n kube-system get ds openstack-cloud-controller-manager -o wide
+elif kubectl -n kube-system get deploy openstack-cloud-controller-manager >/dev/null 2>&1; then
+  kubectl -n kube-system get deploy openstack-cloud-controller-manager -o wide
+else
+  echo "::warning::CCM installed, but workload name check did not find expected deployment/daemonset."
+  kubectl -n kube-system get deploy,ds | grep -i openstack-cloud-controller-manager || true
+fi
