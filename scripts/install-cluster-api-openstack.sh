@@ -60,6 +60,65 @@ fi
 
 clusterctl version
 
+INIT_ARGS=(
+  init
+  --core cluster-api
+  --bootstrap kubeadm
+  --control-plane kubeadm
+  --ipam in-cluster
+  --infrastructure openstack
+  --wait-providers
+)
+
+UPGRADE_ARGS=(
+  upgrade apply
+  --wait-providers
+)
+
+if [ -n "${CAPI_CORE_PROVIDER_VERSION}" ]; then
+  INIT_ARGS+=(--core "cluster-api:${CAPI_CORE_PROVIDER_VERSION}")
+  UPGRADE_ARGS+=(--core "cluster-api:${CAPI_CORE_PROVIDER_VERSION}")
+fi
+if [ -n "${CAPI_BOOTSTRAP_PROVIDER_VERSION}" ]; then
+  INIT_ARGS+=(--bootstrap "kubeadm:${CAPI_BOOTSTRAP_PROVIDER_VERSION}")
+  UPGRADE_ARGS+=(--bootstrap "kubeadm:${CAPI_BOOTSTRAP_PROVIDER_VERSION}")
+fi
+if [ -n "${CAPI_CONTROL_PLANE_PROVIDER_VERSION}" ]; then
+  INIT_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
+  UPGRADE_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
+fi
+if [ -n "${CAPI_IPAM_PROVIDER_VERSION}" ]; then
+  INIT_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
+  UPGRADE_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
+fi
+if [ -n "${CAPO_PROVIDER_VERSION}" ]; then
+  INIT_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
+  UPGRADE_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
+fi
+
+run_upgrade_with_recovery() {
+  set +e
+  UPGRADE_OUTPUT="$(clusterctl "${UPGRADE_ARGS[@]}" 2>&1)"
+  UPGRADE_RC=$?
+  set -e
+
+  if [ "${UPGRADE_RC}" -eq 0 ]; then
+    echo "${UPGRADE_OUTPUT}"
+    return 0
+  fi
+
+  if echo "${UPGRADE_OUTPUT}" | grep -q 'customresourcedefinitions.apiextensions.k8s.io "clusters.cluster.x-k8s.io" not found'; then
+    echo "${UPGRADE_OUTPUT}"
+    echo "::warning::Detected partial/broken CAPI install (clusters.cluster.x-k8s.io missing). Cleaning stale providers and retrying init."
+    clusterctl delete --bootstrap kubeadm --control-plane kubeadm --infrastructure openstack --ipam in-cluster --include-namespace || true
+    clusterctl "${INIT_ARGS[@]}"
+    return 0
+  fi
+
+  echo "${UPGRADE_OUTPUT}"
+  return "${UPGRADE_RC}"
+}
+
 if kubectl get providers.clusterctl.cluster.x-k8s.io -A >/dev/null 2>&1; then
   EXISTING_PROVIDER_COUNT="$(kubectl get providers.clusterctl.cluster.x-k8s.io -A --no-headers 2>/dev/null | wc -l | tr -d ' ')"
 else
@@ -67,32 +126,6 @@ else
 fi
 
 if [ "${EXISTING_PROVIDER_COUNT}" -eq 0 ]; then
-  INIT_ARGS=(
-    init
-    --core cluster-api
-    --bootstrap kubeadm
-    --control-plane kubeadm
-    --ipam in-cluster
-    --infrastructure openstack
-    --wait-providers
-  )
-
-  if [ -n "${CAPI_CORE_PROVIDER_VERSION}" ]; then
-    INIT_ARGS+=(--core "cluster-api:${CAPI_CORE_PROVIDER_VERSION}")
-  fi
-  if [ -n "${CAPI_BOOTSTRAP_PROVIDER_VERSION}" ]; then
-    INIT_ARGS+=(--bootstrap "kubeadm:${CAPI_BOOTSTRAP_PROVIDER_VERSION}")
-  fi
-  if [ -n "${CAPI_CONTROL_PLANE_PROVIDER_VERSION}" ]; then
-    INIT_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
-  fi
-  if [ -n "${CAPI_IPAM_PROVIDER_VERSION}" ]; then
-    INIT_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
-  fi
-  if [ -n "${CAPO_PROVIDER_VERSION}" ]; then
-    INIT_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
-  fi
-
   set +e
   INIT_OUTPUT="$(clusterctl "${INIT_ARGS[@]}" 2>&1)"
   INIT_RC=$?
@@ -102,54 +135,14 @@ if [ "${EXISTING_PROVIDER_COUNT}" -eq 0 ]; then
   elif echo "${INIT_OUTPUT}" | grep -q "there is already an instance of the"; then
     echo "${INIT_OUTPUT}"
     echo "::warning::clusterctl init reported existing providers; retrying with clusterctl upgrade apply."
-    UPGRADE_ARGS=(
-      upgrade apply
-      --wait-providers
-    )
-    if [ -n "${CAPI_CORE_PROVIDER_VERSION}" ]; then
-      UPGRADE_ARGS+=(--core "cluster-api:${CAPI_CORE_PROVIDER_VERSION}")
-    fi
-    if [ -n "${CAPI_BOOTSTRAP_PROVIDER_VERSION}" ]; then
-      UPGRADE_ARGS+=(--bootstrap "kubeadm:${CAPI_BOOTSTRAP_PROVIDER_VERSION}")
-    fi
-    if [ -n "${CAPI_CONTROL_PLANE_PROVIDER_VERSION}" ]; then
-      UPGRADE_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
-    fi
-    if [ -n "${CAPI_IPAM_PROVIDER_VERSION}" ]; then
-      UPGRADE_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
-    fi
-    if [ -n "${CAPO_PROVIDER_VERSION}" ]; then
-      UPGRADE_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
-    fi
-    clusterctl "${UPGRADE_ARGS[@]}"
+    run_upgrade_with_recovery
   else
     echo "${INIT_OUTPUT}"
     exit "${INIT_RC}"
   fi
 else
-  UPGRADE_ARGS=(
-    upgrade apply
-    --wait-providers
-  )
-
-  if [ -n "${CAPI_CORE_PROVIDER_VERSION}" ]; then
-    UPGRADE_ARGS+=(--core "cluster-api:${CAPI_CORE_PROVIDER_VERSION}")
-  fi
-  if [ -n "${CAPI_BOOTSTRAP_PROVIDER_VERSION}" ]; then
-    UPGRADE_ARGS+=(--bootstrap "kubeadm:${CAPI_BOOTSTRAP_PROVIDER_VERSION}")
-  fi
-  if [ -n "${CAPI_CONTROL_PLANE_PROVIDER_VERSION}" ]; then
-    UPGRADE_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
-  fi
-  if [ -n "${CAPI_IPAM_PROVIDER_VERSION}" ]; then
-    UPGRADE_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
-  fi
-  if [ -n "${CAPO_PROVIDER_VERSION}" ]; then
-    UPGRADE_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
-  fi
-
   echo "::notice::Detected existing CAPI providers (${EXISTING_PROVIDER_COUNT}); running clusterctl upgrade apply instead of init."
-  clusterctl "${UPGRADE_ARGS[@]}"
+  run_upgrade_with_recovery
 fi
 
 kubectl create namespace "${CAPI_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
