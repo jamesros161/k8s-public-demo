@@ -21,6 +21,7 @@ prompt_default() {
   if [ -z "${result}" ]; then
     result="${default_value}"
   fi
+  result="${result//$'\r'/}"
   printf '%s' "${result}"
 }
 
@@ -29,6 +30,7 @@ prompt_required() {
   local result=""
   while true; do
     read -r -p "${prompt}: " result
+    result="${result//$'\r'/}"
     if [ -n "${result}" ]; then
       printf '%s' "${result}"
       return
@@ -41,6 +43,7 @@ prompt_optional() {
   local prompt="$1"
   local result=""
   read -r -p "${prompt} (optional): " result
+  result="${result//$'\r'/}"
   printf '%s' "${result}"
 }
 
@@ -50,12 +53,20 @@ prompt_required_secret() {
   while true; do
     read -r -s -p "${prompt}: " result
     echo
+    result="${result//$'\r'/}"
     if [ -n "${result}" ]; then
       printf '%s' "${result}"
       return
     fi
     echo "Value is required."
   done
+}
+
+sanitize_single_line() {
+  local value="${1:-}"
+  value="${value//$'\r'/}"
+  value="${value//$'\n'/}"
+  printf '%s' "${value}"
 }
 
 normalize_identity_v3_url() {
@@ -334,6 +345,12 @@ DEMO_DB_PASSWORD="$(openssl rand -base64 32 | tr -d '\n')"
 DEMO_DB_ROOT_PASSWORD="$(openssl rand -base64 48 | tr -d '\n')"
 TF_VAR_k8s_enabled="true"
 TF_VAR_k8s_join_token="$(generate_join_token)"
+
+# Keep generated env entries strictly one-line (no hidden CR/LF from pasted values).
+OS_APPLICATION_CREDENTIAL_ID="$(sanitize_single_line "${OS_APPLICATION_CREDENTIAL_ID}")"
+OS_APPLICATION_CREDENTIAL_SECRET="$(sanitize_single_line "${OS_APPLICATION_CREDENTIAL_SECRET}")"
+AWS_ACCESS_KEY_ID="$(sanitize_single_line "${AWS_ACCESS_KEY_ID}")"
+AWS_SECRET_ACCESS_KEY="$(sanitize_single_line "${AWS_SECRET_ACCESS_KEY}")"
 
 OUTPUT_ENV="${REPO_ROOT}/cloud-admin-config.generated.env"
 OUTPUT_B64="${REPO_ROOT}/cloud-admin-config.generated.b64"
