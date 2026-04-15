@@ -6,6 +6,7 @@ CAPI_CORE_PROVIDER_VERSION="${CAPI_CORE_PROVIDER_VERSION:-}"
 CAPI_BOOTSTRAP_PROVIDER_VERSION="${CAPI_BOOTSTRAP_PROVIDER_VERSION:-}"
 CAPI_CONTROL_PLANE_PROVIDER_VERSION="${CAPI_CONTROL_PLANE_PROVIDER_VERSION:-}"
 CAPO_PROVIDER_VERSION="${CAPO_PROVIDER_VERSION:-}"
+CAPI_IPAM_PROVIDER_VERSION="${CAPI_IPAM_PROVIDER_VERSION:-}"
 CAPI_NAMESPACE="${CAPI_NAMESPACE:-capo-system}"
 
 require_nonempty() {
@@ -64,6 +65,7 @@ INIT_ARGS=(
   --core cluster-api
   --bootstrap kubeadm
   --control-plane kubeadm
+  --ipam in-cluster
   --infrastructure openstack
   --wait-providers
 )
@@ -76,6 +78,9 @@ if [ -n "${CAPI_BOOTSTRAP_PROVIDER_VERSION}" ]; then
 fi
 if [ -n "${CAPI_CONTROL_PLANE_PROVIDER_VERSION}" ]; then
   INIT_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
+fi
+if [ -n "${CAPI_IPAM_PROVIDER_VERSION}" ]; then
+  INIT_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
 fi
 if [ -n "${CAPO_PROVIDER_VERSION}" ]; then
   INIT_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")

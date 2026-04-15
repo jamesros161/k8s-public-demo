@@ -49,4 +49,4 @@ id_rsa.pub
 *.swp
 *~
 cloud-admin-config.generated.*
-
+*.b64
