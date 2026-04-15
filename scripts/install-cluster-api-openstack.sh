@@ -93,7 +93,39 @@ if [ "${EXISTING_PROVIDER_COUNT}" -eq 0 ]; then
     INIT_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
   fi
 
-  clusterctl "${INIT_ARGS[@]}"
+  set +e
+  INIT_OUTPUT="$(clusterctl "${INIT_ARGS[@]}" 2>&1)"
+  INIT_RC=$?
+  set -e
+  if [ "${INIT_RC}" -eq 0 ]; then
+    echo "${INIT_OUTPUT}"
+  elif echo "${INIT_OUTPUT}" | grep -q "there is already an instance of the"; then
+    echo "${INIT_OUTPUT}"
+    echo "::warning::clusterctl init reported existing providers; retrying with clusterctl upgrade apply."
+    UPGRADE_ARGS=(
+      upgrade apply
+      --wait-providers
+    )
+    if [ -n "${CAPI_CORE_PROVIDER_VERSION}" ]; then
+      UPGRADE_ARGS+=(--core "cluster-api:${CAPI_CORE_PROVIDER_VERSION}")
+    fi
+    if [ -n "${CAPI_BOOTSTRAP_PROVIDER_VERSION}" ]; then
+      UPGRADE_ARGS+=(--bootstrap "kubeadm:${CAPI_BOOTSTRAP_PROVIDER_VERSION}")
+    fi
+    if [ -n "${CAPI_CONTROL_PLANE_PROVIDER_VERSION}" ]; then
+      UPGRADE_ARGS+=(--control-plane "kubeadm:${CAPI_CONTROL_PLANE_PROVIDER_VERSION}")
+    fi
+    if [ -n "${CAPI_IPAM_PROVIDER_VERSION}" ]; then
+      UPGRADE_ARGS+=(--ipam "in-cluster:${CAPI_IPAM_PROVIDER_VERSION}")
+    fi
+    if [ -n "${CAPO_PROVIDER_VERSION}" ]; then
+      UPGRADE_ARGS+=(--infrastructure "openstack:${CAPO_PROVIDER_VERSION}")
+    fi
+    clusterctl "${UPGRADE_ARGS[@]}"
+  else
+    echo "${INIT_OUTPUT}"
+    exit "${INIT_RC}"
+  fi
 else
   UPGRADE_ARGS=(
     upgrade apply
