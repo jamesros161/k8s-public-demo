@@ -4,12 +4,14 @@ This branch is a **Magnum-free** OpenStack PoC for Kubernetes autoscaling.
 
 The repository demonstrates:
 
-- OpenStack tenant networking and Kubernetes VM provisioning with Terraform (cloud-init + kubeadm)
+- OpenStack tenant networking and management-cluster provisioning with Terraform (cloud-init + kubeadm)
+- Cluster API (CAPI) + CAPO bootstrap on the management cluster
+- CAPO-managed workload cluster (control plane + MachineDeployment workers)
 - Kubernetes access + cloud config via one bundled secret (`CLOUD_ADMIN_CONFIG_B64`)
 - OpenStack CCM (Octavia) integration for `Service type=LoadBalancer`
 - OpenStack Cinder CSI install for dynamic persistent volume provisioning
 - App deployment with Helm (WordPress/Drupal)
-- Kubernetes-native autoscaling path: HPA + metrics-server + cluster-autoscaler (installed during provisioning)
+- Kubernetes-native autoscaling path: HPA + metrics-server + cluster-autoscaler (clusterapi mode)
 
 ## Quick start
 
@@ -17,7 +19,7 @@ The repository demonstrates:
 2. Prepare an OpenStack project with required quotas and API access.
 3. Add one GitHub secret: `CLOUD_ADMIN_CONFIG_B64`.
 4. Run `01 - Validate configuration`.
-5. Run `02 - Provision Cluster` (Terraform network + VM cluster build + Traefik install).
+5. Run `02 - Provision Cluster` (Terraform + CAPI bootstrap + CAPO workload cluster + Traefik install).
 6. Point DNS to Traefik and run `03 - Deploy Single Site` (workflows auto-download and decrypt kubeconfig artifact at runtime).
 
 ## Single secret setup
@@ -44,11 +46,14 @@ Cloud admins can also generate this bundle interactively (from `clouds.yaml` in 
 bash scripts/generate-cloud-admin-config.sh
 ```
 
-The provision workflow also requires cluster build keys in the bundle:
+The provision workflow requires management/workload cluster keys in the bundle:
 
 - `K8S_IMAGE_NAME`, `K8S_FLAVOR_NAME`
 - `KUBECONFIG_ARTIFACT_PASSPHRASE` (encrypt kubeconfig artifact)
-- `TF_VAR_k8s_worker_count`, `TF_VAR_k8s_worker_max_count` (autoscaler min/max defaults; names are auto-derived from `TF_VAR_cluster_name`)
+- `CAPI_NAMESPACE`, `CAPI_WORKLOAD_CLUSTER_NAME`, `CAPI_WORKLOAD_KUBERNETES_VERSION`
+- `CAPI_WORKLOAD_CONTROL_PLANE_MACHINE_COUNT`, `CAPI_WORKLOAD_WORKER_MACHINE_COUNT`
+- `TF_VAR_k8s_worker_count`, `TF_VAR_k8s_worker_max_count`
+- `AUTOSCALER_MODE=clusterapi` (default in example bundle)
 - Optional OpenStack CCM tuning: `OPENSTACK_CCM_CHART_VERSION`, `OPENSTACK_CCM_USE_OCTAVIA`
 - Optional Cinder CSI tuning: `CINDER_CSI_CHART_VERSION`, `CINDER_CSI_STORAGECLASS_NAME`, `CINDER_CSI_SET_DEFAULT_SC`
 - Optional autoscaler image pin: `CLUSTER_AUTOSCALER_IMAGE_REPOSITORY`, `CLUSTER_AUTOSCALER_IMAGE_TAG`
@@ -58,7 +63,7 @@ The provision workflow also requires cluster build keys in the bundle:
 | Workflow | Purpose |
 |----------|---------|
 | `01 - Validate configuration` | Validate required values by scenario |
-| `02 - Provision Cluster` | Terraform apply (networking + kubeadm cluster), fetch/encrypt kubeconfig artifact, install OpenStack CCM + Cinder CSI + autoscaling stack + Traefik |
+| `02 - Provision Cluster` | Terraform apply, bootstrap CAPI/CAPO, create CAPO workload cluster, export workload kubeconfig artifact, install CCM + Cinder CSI + autoscaling stack + Traefik |
 | `03 - Deploy Single Site` | Deploy WordPress or Drupal site |
 | `04 - Destroy Single Site` | Delete one site namespace |
 | `05 - Tune cluster autoscaler` | Patch scale-down timers in `kube-system` |
@@ -74,10 +79,11 @@ The provision workflow also requires cluster build keys in the bundle:
 
 `02 - Provision Cluster` now:
 
-1. Creates control-plane and worker VMs with cloud-init + kubeadm.
-2. Reads kubeconfig from control-plane cloud-init console output markers (no runner SSH required).
-3. Encrypts kubeconfig with `KUBECONFIG_ARTIFACT_PASSPHRASE`.
-4. Uploads artifact `kubeconfig-encrypted-<run_id>`.
+1. Creates a kubeadm management cluster with Terraform.
+2. Bootstraps CAPI/CAPO providers on the management cluster.
+3. Creates a CAPO workload cluster and exports its kubeconfig secret.
+4. Encrypts workload kubeconfig with `KUBECONFIG_ARTIFACT_PASSPHRASE`.
+5. Uploads artifact `kubeconfig-encrypted-<run_id>`.
 
 Decrypt example (optional local troubleshooting):
 
@@ -89,7 +95,7 @@ gpg --output kubeconfig --decrypt kubeconfig.gpg
 
 - **Pod autoscaling:** Helm chart ships an HPA (`autoscaling/v2`) for app pods.
 - **Metrics pipeline:** installed automatically in `02 - Provision Cluster`.
-- **Node autoscaling:** cluster-autoscaler is installed automatically in `02 - Provision Cluster`.
+- **Node autoscaling:** cluster-autoscaler is installed in `cloudProvider=clusterapi` mode in `02 - Provision Cluster`.
 - **Recovery path:** workflow `12` can re-install autoscaling components if needed.
 - **Burst KPIs:** workflows `06` and `07` publish artifacts with timing, pending pods, and node churn metrics.
 

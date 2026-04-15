@@ -1,0 +1,149 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: __NAMESPACE__
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: OpenStackCluster
+metadata:
+  name: __CLUSTER_NAME__
+  namespace: __NAMESPACE__
+spec:
+  identityRef:
+    cloudName: openstack
+    kind: Secret
+    name: capo-cloud-config
+  managedSecurityGroups: {}
+  apiServerLoadBalancer:
+    enabled: true
+  externalNetwork:
+    id: __EXTERNAL_NETWORK_ID__
+  network:
+    id: __NETWORK_ID__
+    subnets:
+      - id: __SUBNET_ID__
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: OpenStackMachineTemplate
+metadata:
+  name: __CLUSTER_NAME__-control-plane
+  namespace: __NAMESPACE__
+spec:
+  template:
+    spec:
+      flavor: __CONTROL_PLANE_FLAVOR__
+      image:
+        filter:
+          name: __IMAGE_NAME__
+      sshKeyName: __SSH_KEY_NAME__
+      identityRef:
+        cloudName: openstack
+        kind: Secret
+        name: capo-cloud-config
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+kind: KubeadmControlPlane
+metadata:
+  name: __CLUSTER_NAME__-control-plane
+  namespace: __NAMESPACE__
+spec:
+  replicas: __CONTROL_PLANE_REPLICAS__
+  version: __KUBERNETES_VERSION__
+  machineTemplate:
+    infrastructureRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+      kind: OpenStackMachineTemplate
+      name: __CLUSTER_NAME__-control-plane
+  kubeadmConfigSpec:
+    clusterConfiguration:
+      apiServer:
+        extraArgs:
+          cloud-provider: external
+      controllerManager:
+        extraArgs:
+          cloud-provider: external
+    initConfiguration:
+      nodeRegistration:
+        kubeletExtraArgs:
+          cloud-provider: external
+    joinConfiguration:
+      nodeRegistration:
+        kubeletExtraArgs:
+          cloud-provider: external
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: Cluster
+metadata:
+  name: __CLUSTER_NAME__
+  namespace: __NAMESPACE__
+spec:
+  clusterNetwork:
+    pods:
+      cidrBlocks:
+        - __POD_CIDR__
+    services:
+      cidrBlocks:
+        - __SERVICE_CIDR__
+  controlPlaneRef:
+    apiVersion: controlplane.cluster.x-k8s.io/v1beta1
+    kind: KubeadmControlPlane
+    name: __CLUSTER_NAME__-control-plane
+  infrastructureRef:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+    kind: OpenStackCluster
+    name: __CLUSTER_NAME__
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: OpenStackMachineTemplate
+metadata:
+  name: __CLUSTER_NAME__-md-0
+  namespace: __NAMESPACE__
+spec:
+  template:
+    spec:
+      flavor: __WORKER_FLAVOR__
+      image:
+        filter:
+          name: __IMAGE_NAME__
+      sshKeyName: __SSH_KEY_NAME__
+      identityRef:
+        cloudName: openstack
+        kind: Secret
+        name: capo-cloud-config
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+kind: KubeadmConfigTemplate
+metadata:
+  name: __CLUSTER_NAME__-md-0
+  namespace: __NAMESPACE__
+spec:
+  template:
+    spec:
+      joinConfiguration:
+        nodeRegistration:
+          kubeletExtraArgs:
+            cloud-provider: external
+---
+apiVersion: cluster.x-k8s.io/v1beta1
+kind: MachineDeployment
+metadata:
+  name: __CLUSTER_NAME__-md-0
+  namespace: __NAMESPACE__
+spec:
+  clusterName: __CLUSTER_NAME__
+  replicas: __WORKER_REPLICAS__
+  selector:
+    matchLabels: null
+  template:
+    spec:
+      clusterName: __CLUSTER_NAME__
+      bootstrap:
+        configRef:
+          apiVersion: bootstrap.cluster.x-k8s.io/v1beta1
+          kind: KubeadmConfigTemplate
+          name: __CLUSTER_NAME__-md-0
+      infrastructureRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: OpenStackMachineTemplate
+        name: __CLUSTER_NAME__-md-0
+      version: __KUBERNETES_VERSION__

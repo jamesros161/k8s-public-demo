@@ -80,6 +80,9 @@ if [ "$SCENARIO" = "provision" ]; then
   if [ -n "${AS_NODES_MAX_SIZE:-}" ] && ! [[ "${AS_NODES_MAX_SIZE}" =~ ^[0-9]+$ ]]; then
     err "AS_NODES_MAX_SIZE must be an integer when set."
   fi
+  if [ -n "${AUTOSCALER_MODE:-}" ] && [ "${AUTOSCALER_MODE}" != "openstack" ] && [ "${AUTOSCALER_MODE}" != "clusterapi" ]; then
+    err "AUTOSCALER_MODE must be openstack or clusterapi when set."
+  fi
   if [ -n "${CINDER_CSI_SET_DEFAULT_SC:-}" ] && [ "${CINDER_CSI_SET_DEFAULT_SC}" != "true" ] && [ "${CINDER_CSI_SET_DEFAULT_SC}" != "false" ]; then
     err "CINDER_CSI_SET_DEFAULT_SC must be true or false when set."
   fi
@@ -89,6 +92,22 @@ if [ "$SCENARIO" = "provision" ]; then
 
   if [ -n "${TF_STATE_S3_ENDPOINT:-}" ] && [[ ! "${TF_STATE_S3_ENDPOINT}" =~ ^https?:// ]]; then
     err "TF_STATE_S3_ENDPOINT should start with http:// or https://"
+  fi
+
+  # CAPI/CAPO defaults for workload-cluster flow.
+  require_nonempty "CAPI_CLUSTERCTL_VERSION" "${CAPI_CLUSTERCTL_VERSION:-}"
+  require_nonempty "CAPI_NAMESPACE" "${CAPI_NAMESPACE:-}"
+  require_nonempty "CAPI_WORKLOAD_CLUSTER_NAME" "${CAPI_WORKLOAD_CLUSTER_NAME:-}"
+  require_nonempty "CAPI_WORKLOAD_KUBERNETES_VERSION" "${CAPI_WORKLOAD_KUBERNETES_VERSION:-}"
+  require_nonempty "CAPI_WORKLOAD_CONTROL_PLANE_MACHINE_COUNT" "${CAPI_WORKLOAD_CONTROL_PLANE_MACHINE_COUNT:-}"
+  require_nonempty "CAPI_WORKLOAD_WORKER_MACHINE_COUNT" "${CAPI_WORKLOAD_WORKER_MACHINE_COUNT:-}"
+  require_nonempty "CAPI_WORKLOAD_CONTROL_PLANE_FLAVOR" "${CAPI_WORKLOAD_CONTROL_PLANE_FLAVOR:-${K8S_FLAVOR_NAME:-}}"
+  require_nonempty "CAPI_WORKLOAD_WORKER_FLAVOR" "${CAPI_WORKLOAD_WORKER_FLAVOR:-${K8S_FLAVOR_NAME:-}}"
+  require_nonempty "CAPI_WORKLOAD_IMAGE_NAME" "${CAPI_WORKLOAD_IMAGE_NAME:-${K8S_IMAGE_NAME:-}}"
+
+  if [ -n "${AUTOSCALER_MODE:-}" ] && [ "${AUTOSCALER_MODE}" = "clusterapi" ]; then
+    require_nonempty "CAPI_AUTOSCALER_NAMESPACE" "${CAPI_AUTOSCALER_NAMESPACE:-${CAPI_NAMESPACE:-}}"
+    require_nonempty "CAPI_AUTOSCALER_CLUSTER_NAME" "${CAPI_AUTOSCALER_CLUSTER_NAME:-${CAPI_WORKLOAD_CLUSTER_NAME:-}}"
   fi
 fi
 

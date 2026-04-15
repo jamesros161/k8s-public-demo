@@ -29,14 +29,21 @@ If those permissions are unavailable, run this demo in **fixed node pool** mode 
 
 ## 2) Kubernetes cluster provisioning inputs
 
-This branch provisions the Kubernetes cluster during workflow `02 - Provision Cluster` (Terraform + cloud-init + kubeadm).
-The same workflow also installs OpenStack CCM (for Octavia LoadBalancer integration) and OpenStack Cinder CSI (for dynamic PVC provisioning).
+This branch first provisions a management cluster with Terraform + cloud-init + kubeadm, then creates a CAPO workload cluster in workflow `02 - Provision Cluster`.
+The same workflow installs OpenStack CCM, OpenStack Cinder CSI, and Traefik against the CAPO workload cluster.
 
 Provide these bundle keys:
 
 - `K8S_IMAGE_NAME` (Ubuntu image recommended)
 - `K8S_FLAVOR_NAME`
 - `KUBECONFIG_ARTIFACT_PASSPHRASE`
+- `CAPI_NAMESPACE`
+- `CAPI_WORKLOAD_CLUSTER_NAME`
+- `CAPI_WORKLOAD_KUBERNETES_VERSION`
+- `CAPI_WORKLOAD_CONTROL_PLANE_MACHINE_COUNT`
+- `CAPI_WORKLOAD_WORKER_MACHINE_COUNT`
+- `CAPI_WORKLOAD_CONTROL_PLANE_FLAVOR` / `CAPI_WORKLOAD_WORKER_FLAVOR`
+- `CAPI_WORKLOAD_IMAGE_NAME`
 
 ## 3) OpenStack credentials for Terraform networking
 
@@ -73,10 +80,11 @@ Required for site and burst workflows:
 
 ## 7) Autoscaling stack handoff (required)
 
-`02 - Provision Cluster` installs autoscaling stack by default, so provide:
+`02 - Provision Cluster` installs autoscaling stack in clusterapi mode by default, so provide:
 
+- `AUTOSCALER_MODE=clusterapi`
 - `TF_VAR_k8s_worker_count`, `TF_VAR_k8s_worker_max_count`
-- Cluster/group names are derived automatically from `TF_VAR_cluster_name`
+- `CAPI_AUTOSCALER_NAMESPACE`, `CAPI_AUTOSCALER_CLUSTER_NAME`
 - Optional chart pinning: `METRICS_SERVER_CHART_VERSION`, `CLUSTER_AUTOSCALER_CHART_VERSION`, `OPENSTACK_CCM_CHART_VERSION`, `CINDER_CSI_CHART_VERSION`
 - Optional OpenStack CCM control: `OPENSTACK_CCM_USE_OCTAVIA`
 - Optional Cinder CSI storage class controls: `CINDER_CSI_STORAGECLASS_NAME`, `CINDER_CSI_SET_DEFAULT_SC`
@@ -93,6 +101,6 @@ Workflow `12 - Repair Autoscaling Stack` is now mainly for repair/reinstall.
 1. Populate [`cloud-admin-config.env.example`](../cloud-admin-config.env.example), then base64 encode it and provide that string.
 2. Customer sets GitHub secret `CLOUD_ADMIN_CONFIG_B64`.
 3. Customer runs `01 - Validate configuration` (scenario `provision`).
-4. Customer runs `02 - Provision Cluster`.
+4. Customer runs `02 - Provision Cluster` (management + workload cluster provisioning).
 5. Customer points DNS to Traefik and runs `03 - Deploy Single Site` (workflow auto-downloads/decrypts kubeconfig artifact).
 6. For autoscaling PoC, customer can run `12 - Repair Autoscaling Stack` if autoscaling components need repair, then run `06` and `07` for KPI artifacts.

@@ -110,7 +110,24 @@ jobs:
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
-      - name: Load kubeconfig
+      - name: Load management-cluster kubeconfig
+        run: bash scripts/load-kubeconfig-from-secret.sh
+
+      - name: Persist management kubeconfig for clusterapi autoscaler
+        run: |
+          set -euo pipefail
+          echo "CAPI_MANAGEMENT_KUBECONFIG_B64=${KUBECONFIG_B64}" >> "$GITHUB_ENV"
+
+      - name: Bootstrap Cluster API + CAPO providers
+        run: bash scripts/install-cluster-api-openstack.sh
+
+      - name: Provision CAPO workload cluster
+        run: bash scripts/provision-capo-workload-cluster.sh
+
+      - name: Export CAPO workload kubeconfig from CAPI secret
+        run: bash scripts/export-capo-workload-kubeconfig.sh
+
+      - name: Load workload-cluster kubeconfig
         run: bash scripts/load-kubeconfig-from-secret.sh
 
       - name: Setup Helm
@@ -134,16 +151,9 @@ jobs:
       - name: Install Cinder CSI driver + StorageClass
         run: bash scripts/install-cinder-csi.sh
 
-      - name: Export derived autoscaler settings from Terraform outputs
-        working-directory: terraform
-        run: |
-          set -euo pipefail
-          echo "AS_CLUSTER_NAME=$(terraform output -raw autoscaler_cluster_name)" >> "$GITHUB_ENV"
-          echo "AS_GROUP_NAME=$(terraform output -raw autoscaler_group_name)" >> "$GITHUB_ENV"
-          echo "AS_NODES_MIN_SIZE=$(terraform output -raw autoscaler_nodes_min_size)" >> "$GITHUB_ENV"
-          echo "AS_NODES_MAX_SIZE=$(terraform output -raw autoscaler_nodes_max_size)" >> "$GITHUB_ENV"
-
       - name: Install autoscaling stack
+        env:
+          AUTOSCALER_MODE: clusterapi
         run: bash scripts/install-autoscaling-stack.sh
 
       - name: Install Traefik

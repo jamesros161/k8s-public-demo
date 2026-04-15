@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+AUTOSCALER_MODE="${AUTOSCALER_MODE:-openstack}"
 METRICS_SERVER_CHART_VERSION="${METRICS_SERVER_CHART_VERSION:-}"
 CLUSTER_AUTOSCALER_CHART_VERSION="${CLUSTER_AUTOSCALER_CHART_VERSION:-}"
 CLUSTER_AUTOSCALER_IMAGE_REPOSITORY="${CLUSTER_AUTOSCALER_IMAGE_REPOSITORY:-registry.k8s.io/autoscaling/cluster-autoscaler}"
@@ -13,6 +14,9 @@ AS_CLUSTER_NAME="$(echo "${AS_CLUSTER_NAME_RAW}" | tr '[:upper:]' '[:lower:]')"
 AS_GROUP_NAME="${AS_GROUP_NAME:-${AS_CLUSTER_NAME}-worker}"
 AS_NODES_MIN_SIZE="${AS_NODES_MIN_SIZE:-${TF_VAR_k8s_worker_count:-2}}"
 AS_NODES_MAX_SIZE="${AS_NODES_MAX_SIZE:-${TF_VAR_k8s_worker_max_count:-${AS_NODES_MIN_SIZE}}}"
+CAPI_AUTOSCALER_NAMESPACE="${CAPI_AUTOSCALER_NAMESPACE:-${CAPI_NAMESPACE:-capo-system}}"
+CAPI_AUTOSCALER_CLUSTER_NAME="${CAPI_AUTOSCALER_CLUSTER_NAME:-${CAPI_WORKLOAD_CLUSTER_NAME:-${TF_VAR_cluster_name:-vpc-demo}-workload}}"
+CAPI_MANAGEMENT_KUBECONFIG_B64="${CAPI_MANAGEMENT_KUBECONFIG_B64:-}"
 
 recover_pending_release() {
   local release="$1"
@@ -74,6 +78,167 @@ run_helm_with_retry() {
   return 1
 }
 
+install_clusterapi_autoscaler() {
+  local mgmt_secret_name="clusterapi-management-kubeconfig"
+  local discovery="clusterapi:namespace=${CAPI_AUTOSCALER_NAMESPACE},clusterName=${CAPI_AUTOSCALER_CLUSTER_NAME}"
+  local kubeconfig_arg=""
+  local volume_mount_block=""
+  local volume_block=""
+
+  if [ -n "${CAPI_MANAGEMENT_KUBECONFIG_B64}" ]; then
+    local tmp_kcfg
+    tmp_kcfg="$(mktemp)"
+    echo "${CAPI_MANAGEMENT_KUBECONFIG_B64}" | base64 -d > "${tmp_kcfg}"
+    kubectl -n kube-system create secret generic "${mgmt_secret_name}" \
+      --from-file=value="${tmp_kcfg}" \
+      --dry-run=client \
+      -o yaml | kubectl apply -f -
+    kubeconfig_arg="            - --kubeconfig=/etc/clusterapi/management-kubeconfig/value"
+    volume_mount_block="$(cat <<'EOF'
+          volumeMounts:
+            - name: management-kubeconfig
+              mountPath: /etc/clusterapi/management-kubeconfig
+              readOnly: true
+EOF
+)"
+    volume_block="$(cat <<EOF
+      volumes:
+        - name: management-kubeconfig
+          secret:
+            secretName: ${mgmt_secret_name}
+EOF
+)"
+  else
+    echo "::warning::CAPI_MANAGEMENT_KUBECONFIG_B64 not set; cluster-autoscaler assumes CAPI objects are reachable via in-cluster config."
+  fi
+
+  kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-autoscaler
+rules:
+  - apiGroups: [""]
+    resources: ["events", "endpoints"]
+    verbs: ["create", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    resourceNames: ["cluster-autoscaler"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["watch", "list", "get", "update"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "replicationcontrollers", "persistentvolumeclaims", "persistentvolumes"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: [""]
+    resources: ["namespaces", "resourcequotas"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["extensions", "apps"]
+    resources: ["replicasets", "daemonsets", "statefulsets"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["watch", "list"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses", "csinodes", "csidrivers", "csistoragecapacities"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["batch", "extensions"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+  - apiGroups: ["coordination.k8s.io"]
+    resourceNames: ["cluster-autoscaler"]
+    resources: ["leases"]
+    verbs: ["get", "update"]
+  - apiGroups: ["cluster.x-k8s.io"]
+    resources: ["machines", "machinesets", "machinedeployments", "machinepools"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["cluster.x-k8s.io"]
+    resources: ["clusters", "machinehealthchecks"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["infrastructure.cluster.x-k8s.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-autoscaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-autoscaler
+subjects:
+  - kind: ServiceAccount
+    name: cluster-autoscaler
+    namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: cluster-autoscaler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cluster-autoscaler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cluster-autoscaler
+      annotations:
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+    spec:
+      serviceAccountName: cluster-autoscaler
+      priorityClassName: system-cluster-critical
+      containers:
+        - name: cluster-autoscaler
+          image: ${CLUSTER_AUTOSCALER_IMAGE_REPOSITORY}:${CLUSTER_AUTOSCALER_IMAGE_TAG}
+          command:
+            - ./cluster-autoscaler
+            - --v=4
+            - --cloud-provider=clusterapi
+            - --namespace=${CAPI_AUTOSCALER_NAMESPACE}
+            - --node-group-auto-discovery=${discovery}
+            - --balance-similar-node-groups=true
+            - --skip-nodes-with-local-storage=false
+            - --expander=least-waste
+            - --stderrthreshold=info
+            - --logtostderr=true
+${kubeconfig_arg}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 300Mi
+            limits:
+              cpu: 500m
+              memory: 600Mi
+${volume_mount_block}
+${volume_block}
+EOF
+
+  kubectl -n kube-system rollout status deploy/cluster-autoscaler --timeout=10m
+  echo "::notice::cluster-autoscaler (clusterapi mode) installed or updated."
+}
+
 if ! [[ "${AS_NODES_MIN_SIZE}" =~ ^[0-9]+$ ]] || ! [[ "${AS_NODES_MAX_SIZE}" =~ ^[0-9]+$ ]]; then
   echo "::error::AS_NODES_MIN_SIZE and AS_NODES_MAX_SIZE must be integers."
   exit 1
@@ -84,6 +249,7 @@ if [ "${AS_NODES_MIN_SIZE}" -gt "${AS_NODES_MAX_SIZE}" ]; then
   exit 1
 fi
 
+echo "::notice::Autoscaler mode: ${AUTOSCALER_MODE}"
 echo "::notice::Autoscaler config: cluster=${AS_CLUSTER_NAME} group=${AS_GROUP_NAME} min=${AS_NODES_MIN_SIZE} max=${AS_NODES_MAX_SIZE}"
 echo "::notice::Autoscaler image: ${CLUSTER_AUTOSCALER_IMAGE_REPOSITORY}:${CLUSTER_AUTOSCALER_IMAGE_TAG}"
 
@@ -106,8 +272,18 @@ fi
 run_helm_with_retry "metrics-server" "kube-system" "${METRICS_ARGS[@]}"
 echo "::notice::metrics-server installed or updated."
 
+if [ "${AUTOSCALER_MODE}" = "clusterapi" ]; then
+  install_clusterapi_autoscaler
+  exit 0
+fi
+
+if [ "${AUTOSCALER_MODE}" != "openstack" ]; then
+  echo "::error::AUTOSCALER_MODE must be 'openstack' or 'clusterapi'."
+  exit 1
+fi
+
 CA_VALUES_FILE="$(mktemp)"
-cat >"${CA_VALUES_FILE}" <<EOF
+cat > "${CA_VALUES_FILE}" <<EOF
 cloudProvider: openstack
 
 rbac:
