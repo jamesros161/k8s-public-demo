@@ -121,6 +121,19 @@ jobs:
       - name: Bootstrap Cluster API + CAPO providers
         run: bash scripts/install-cluster-api-openstack.sh
 
+      - name: Verify CAPI IPAM v1beta2 contract is served
+        run: |
+          set -euo pipefail
+          VERSIONS="$(kubectl get crd ipaddressclaims.ipam.cluster.x-k8s.io -o jsonpath='{.spec.versions[*].name}')"
+          echo "ipaddressclaims.ipam.cluster.x-k8s.io versions: ${VERSIONS}"
+          case " ${VERSIONS} " in
+            *" v1beta2 "*) ;;
+            *)
+              echo "::error::Expected ipam.cluster.x-k8s.io/v1beta2 to be served after bootstrap, but got: ${VERSIONS}"
+              exit 1
+              ;;
+          esac
+
       - name: Provision CAPO workload cluster
         run: bash scripts/provision-capo-workload-cluster.sh
 
